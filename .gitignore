@@ -43,3 +43,4 @@ bin/
 .DS_Store
 
 /cntlm
+application-local.yml

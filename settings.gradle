@@ -1,1 +1,25 @@
+pluginManagement {
+    repositories {
+        maven {
+            url = 'https://www.artifactrepository.citigroup.net:443/artifactory/maven-prod'
+            credentials {
+                username = providers.gradleProperty('artifactory_user').orElse(providers.environmentVariable('ARTIFACTORY_USER')).getOrElse('')
+                password = providers.gradleProperty('artifactory_password').orElse(providers.environmentVariable('ARTIFACTORY_PASSWORD')).getOrElse('')
+            }
+        }
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = 'https://www.artifactrepository.citigroup.net:443/artifactory/maven-prod'
+            credentials {
+                username = providers.gradleProperty('artifactory_user').orElse(providers.environmentVariable('ARTIFACTORY_USER')).getOrElse('')
+                password = providers.gradleProperty('artifactory_password').orElse(providers.environmentVariable('ARTIFACTORY_PASSWORD')).getOrElse('')
+            }
+        }
+    }
+}
+
 rootProject.name = 'jntlm'

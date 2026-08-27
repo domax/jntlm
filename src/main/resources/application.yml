@@ -1,0 +1,48 @@
+# jntlm - Java Spring Boot rewrite of the CNTLM proxy.
+#
+# jntlm is a local HTTP proxy that authenticates on your behalf (via NTLM) to a
+# corporate parent proxy, so tools that cannot do NTLM themselves can reach the
+# internet through the local, unauthenticated port below.
+
+jntlm:
+  # Local listener. Bind to 127.0.0.1 so only this machine can use the proxy.
+  listen-address: 127.0.0.1
+  listen-port: 3128
+
+  # NTLM dialect used when authenticating to the parent proxy. One of:
+  #   NTLMV2  - NTLMv2 only (most secure, recommended default)
+  #   NTLM2SR - NTLM2 Session Response
+  #   NT      - NT response only
+  #   NTLM    - NT + LM responses
+  #   LM      - LM response only (least secure, legacy)
+  auth: NTLMV2
+
+  # Optional manual NTLM negotiate flags (hex or decimal). Leave 0 to let the
+  # selected 'auth' dialect pick CNTLM-compatible defaults.
+  flags: 0
+
+  # Ordered list of parent proxies, "host:port". Tried top-to-bottom with
+  # round-robin failover if one becomes unreachable.
+  parents:
+    - proxy.example.com:8080
+    # - proxy-backup.example.com:8080
+
+  credentials:
+    username: your-username
+    domain: YOURDOMAIN
+    # Workstation name sent in the NTLM handshake. Defaults to this host's
+    # short name when left blank.
+    workstation: ""
+
+    # Provide EITHER the plaintext password (hashes are derived at startup)...
+    password: your-password
+
+    # ...OR pre-computed password hashes (hex), in which case leave 'password'
+    # blank. Generate these offline so the plaintext never sits in config.
+    pass-lm: ""
+    pass-nt: ""
+    pass-ntlm2: ""
+
+logging:
+  level:
+    net.domax.jntlm: INFO
