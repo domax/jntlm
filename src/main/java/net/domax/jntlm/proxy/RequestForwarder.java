@@ -227,7 +227,7 @@ public class RequestForwarder {
                   server.in(),
                   server.out(),
                   server.socket());
-            } catch (IOException ignored) {
+            } catch (Exception ignored) {
               // tunnel closes both ends; nothing more to relay
             }
             discard(server, tcreds);
