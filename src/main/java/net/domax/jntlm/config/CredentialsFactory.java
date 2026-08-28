@@ -64,9 +64,11 @@ public class CredentialsFactory {
       creds.setPassNtlm2(parseHash(src.getPassNtlm2()).orElse(null));
     }
 
+    log.debug("Credential success: {}", creds);
     return creds;
   }
 
+  /** Returns the local hostname (without domain) or "jntlm" if it cannot be determined. */
   private static String defaultWorkstation() {
     val defHost = "jntlm";
     try {

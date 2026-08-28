@@ -1,6 +1,14 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.ntlm;
 
+import static java.lang.System.arraycopy;
+import static net.domax.jntlm.ntlm.NtlmCrypto.desEncryptBlock;
+import static net.domax.jntlm.ntlm.NtlmCrypto.hmacMd5;
+import static net.domax.jntlm.ntlm.NtlmCrypto.md4;
+import static net.domax.jntlm.ntlm.NtlmCrypto.toUnicode;
+
+import lombok.val;
+
 /**
  * Computes the NTLM password hashes.
  *
@@ -19,19 +27,19 @@ public final class NtlmHashes {
    * (OEM charset) and split into two 7-byte DES keys used to encrypt the magic block.
    */
   public static byte[] lmHash(String password) {
-    byte[] oem = NtlmCrypto.toOem(password.toUpperCase());
-    byte[] pass = new byte[14];
-    System.arraycopy(oem, 0, pass, 0, Math.min(14, oem.length));
+    val oem = NtlmCrypto.toOem(password.toUpperCase());
+    val pass = new byte[14];
+    arraycopy(oem, 0, pass, 0, Math.min(14, oem.length));
 
-    byte[] out = new byte[16];
-    System.arraycopy(NtlmCrypto.desEncryptBlock(pass, 0, LM_MAGIC), 0, out, 0, 8);
-    System.arraycopy(NtlmCrypto.desEncryptBlock(pass, 7, LM_MAGIC), 0, out, 8, 8);
+    val out = new byte[16];
+    arraycopy(desEncryptBlock(pass, 0, LM_MAGIC), 0, out, 0, 8);
+    arraycopy(desEncryptBlock(pass, 7, LM_MAGIC), 0, out, 8, 8);
     return out;
   }
 
   /** Computes the 16-byte NT hash: MD4 of the UTF-16LE password. */
   public static byte[] ntHash(String password) {
-    return NtlmCrypto.md4(NtlmCrypto.toUnicode(password));
+    return md4(toUnicode(password));
   }
 
   /**
@@ -39,8 +47,6 @@ public final class NtlmHashes {
    * UTF-16LE of upper-cased(username + domain).
    */
   public static byte[] ntlm2Hash(String username, String domain, String password) {
-    byte[] ntHash = ntHash(password);
-    String combined = (username + domain).toUpperCase();
-    return NtlmCrypto.hmacMd5(ntHash, NtlmCrypto.toUnicode(combined));
+    return hmacMd5(ntHash(password), toUnicode((username + domain).toUpperCase()));
   }
 }

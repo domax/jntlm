@@ -18,8 +18,9 @@ final class Le {
     buf[off + 3] = (byte) (val >>> 24);
   }
 
+  @SuppressWarnings("SameParameterValue")
   static void u64(byte[] buf, int off, long val) {
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; ++i) {
       buf[off + i] = (byte) (val >>> (8 * i));
     }
   }

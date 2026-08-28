@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import lombok.val;
 
 /**
  * Low-level cryptographic primitives used by the NTLM protocol.
@@ -55,10 +56,11 @@ final class NtlmCrypto {
    * @param block the 8-byte plaintext block (typically the NTLM challenge)
    * @return the 8-byte ciphertext
    */
+  @SuppressWarnings({"java:S5547", "java:S5542"})
   static byte[] desEncryptBlock(byte[] keys, int keyOffset, byte[] block) {
     try {
-      SecretKeySpec keySpec = new SecretKeySpec(expandDesKey(keys, keyOffset), "DES");
-      Cipher cipher = Cipher.getInstance("DES/ECB/NoPadding");
+      val keySpec = new SecretKeySpec(expandDesKey(keys, keyOffset), "DES");
+      val cipher = Cipher.getInstance("DES/ECB/NoPadding");
       cipher.init(Cipher.ENCRYPT_MODE, keySpec);
       return cipher.doFinal(block, 0, 8);
     } catch (Exception e) {
@@ -70,6 +72,7 @@ final class NtlmCrypto {
     return Md4.digest(input);
   }
 
+  @SuppressWarnings("java:S4790")
   static byte[] md5(byte[] input) {
     try {
       return java.security.MessageDigest.getInstance("MD5").digest(input);
@@ -78,6 +81,7 @@ final class NtlmCrypto {
     }
   }
 
+  @SuppressWarnings("java:S4790")
   static byte[] hmacMd5(byte[] key, byte[] data) {
     try {
       Mac mac = Mac.getInstance("HmacMD5");

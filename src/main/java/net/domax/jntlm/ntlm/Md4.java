@@ -1,11 +1,15 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.ntlm;
 
+import static java.lang.System.arraycopy;
+
+import lombok.val;
+
 /**
  * Pure-Java implementation of the MD4 message digest (RFC 1320).
  *
  * <p>MD4 is required to compute the NT password hash but is not provided by the standard Java
- * Cryptography Architecture, so it is implemented here. Ported to mirror the behaviour relied upon
+ * Cryptography Architecture, so it is implemented here. Ported to mirror the behavior relied upon
  * by CNTLM's {@code md4_buffer} (via {@code ntlm_hash_nt_password}).
  */
 final class Md4 {
@@ -13,6 +17,7 @@ final class Md4 {
   private Md4() {}
 
   /** Computes the 16-byte MD4 digest of {@code input}. */
+  @SuppressWarnings("java:S2234")
   static byte[] digest(byte[] input) {
     int a = 0x67452301;
     int b = 0xefcdab89;
@@ -20,18 +25,18 @@ final class Md4 {
     int d = 0x10325476;
 
     // Pad the message: append 0x80, then zeros, then the 64-bit little-endian bit length.
-    long bitLen = (long) input.length * 8;
-    int paddedLen = ((input.length + 8) / 64 + 1) * 64;
-    byte[] msg = new byte[paddedLen];
-    System.arraycopy(input, 0, msg, 0, input.length);
+    val bitLen = (long) input.length * 8;
+    val paddedLen = ((input.length + 8) / 64 + 1) * 64;
+    val msg = new byte[paddedLen];
+    arraycopy(input, 0, msg, 0, input.length);
     msg[input.length] = (byte) 0x80;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; ++i) {
       msg[paddedLen - 8 + i] = (byte) (bitLen >>> (8 * i));
     }
 
-    int[] x = new int[16];
+    val x = new int[16];
     for (int off = 0; off < paddedLen; off += 64) {
-      for (int i = 0; i < 16; i++) {
+      for (int i = 0; i < 16; ++i) {
         x[i] =
             (msg[off + i * 4] & 0xff)
                 | ((msg[off + i * 4 + 1] & 0xff) << 8)
@@ -104,7 +109,7 @@ final class Md4 {
       d += dd;
     }
 
-    byte[] out = new byte[16];
+    val out = new byte[16];
     writeLe(out, 0, a);
     writeLe(out, 4, b);
     writeLe(out, 8, c);
@@ -128,9 +133,6 @@ final class Md4 {
   }
 
   private static void writeLe(byte[] out, int off, int val) {
-    out[off] = (byte) val;
-    out[off + 1] = (byte) (val >>> 8);
-    out[off + 2] = (byte) (val >>> 16);
-    out[off + 3] = (byte) (val >>> 24);
+    Le.u32(out, off, val);
   }
 }

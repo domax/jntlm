@@ -1,7 +1,6 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.proxy;
 
-import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 
 /**
@@ -40,7 +39,6 @@ public record ParentProxy(String host, int port) {
     return new ParentProxy(host, port);
   }
 
-  @Contract(pure = true)
   @Override
   public @NonNull String toString() {
     return host + ":" + port;
