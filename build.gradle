@@ -1,48 +1,86 @@
-buildscript {
-    repositories {
-        maven {
-            url = 'https://www.artifactrepository.citigroup.net:443/artifactory/maven-prod'
-            credentials {
-                username = providers
-                        .gradleProperty('artifactory_user')
-                        .orElse(providers.environmentVariable('ARTIFACTORY_USER'))
-                        .getOrElse('')
-                password = providers
-                        .gradleProperty('artifactory_password')
-                        .orElse(providers.environmentVariable('ARTIFACTORY_PASSWORD'))
-                        .getOrElse('')
-            }
-        }
-    }
-    dependencies {
-        classpath 'org.springframework.boot:spring-boot-gradle-plugin:4.0.0'
-    }
+plugins {
+  id 'java'
+  id 'application'
+  id 'jacoco'
+  id 'idea'
+  id 'com.diffplug.spotless' version "7.0.3"
+  id 'io.spring.dependency-management' version '1.1.7'
+  id 'org.springframework.boot' version '4.0.0'
 }
 
-apply plugin: 'java'
-apply plugin: 'org.springframework.boot'
+repositories {
+  mavenCentral()
+}
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(21)
+  }
+}
+
+idea {
+  module {
+    downloadSources = true
+  }
+}
+
+configurations {
+  compileOnly {
+    extendsFrom annotationProcessor
+  }
+}
 
 group = 'net.domax'
 version = '1.0-SNAPSHOT'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
 dependencies {
-    implementation platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
-    annotationProcessor platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
-    testImplementation platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
+  implementation platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
+  annotationProcessor platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
+  testImplementation platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
 
-    implementation 'org.springframework.boot:spring-boot-starter'
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+  implementation 'org.springframework.boot:spring-boot-starter'
+  annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+  testImplementation 'org.springframework.boot:spring-boot-starter-test'
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+  compileOnly 'org.projectlombok:lombok'
+  annotationProcessor 'org.projectlombok:lombok'
+  testCompileOnly 'org.projectlombok:lombok'
+  testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
-tasks.named('test') {
-    useJUnitPlatform()
+test {
+  useJUnitPlatform()
+  jvmArgs "-javaagent:${configurations.testRuntimeClasspath.find { it.name.contains('mockito-core') }}", '-Xshare:off'
+  finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+  dependsOn test
+  reports {
+    xml.required = false
+    csv.required = false
+  }
+}
+
+jacoco {
+  toolVersion = "0.8.13"
+}
+
+spotless {
+  java {
+    removeUnusedImports('cleanthat-javaparser-unnecessaryimport')
+    // apply a specific flavor of google-java-format
+    googleJavaFormat('1.27.0').reflowLongStrings(true).reorderImports(true)
+    // fix formatting of type annotations
+    formatAnnotations()
+    // make sure every file has the following copyright header.
+    licenseHeader '/* JNTLM © Licensed under MIT $YEAR. */'
+  }
+}
+
+// IntelliJ Gradle sync expects this task to exist; register it only if absent.
+if (!tasks.names.contains('prepareKotlinBuildScriptModel')) {
+  tasks.register('prepareKotlinBuildScriptModel') {}
 }
