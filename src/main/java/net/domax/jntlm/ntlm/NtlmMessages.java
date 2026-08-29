@@ -28,6 +28,48 @@ public final class NtlmMessages {
   /** Offset between the Unix epoch and the Windows FILETIME epoch (1601), in seconds. */
   private static final long FILETIME_EPOCH_OFFSET = 11644473600L;
 
+  // Individual NTLM negotiate flags (MS-NLMP).
+  private static final long NEGOTIATE_56 = 0x80000000L;
+  private static final long NEGOTIATE_128 = 0x20000000L;
+  private static final long NEGOTIATE_VERSION = 0x02000000L;
+  private static final long NEGOTIATE_EXTENDED_SESSION_SECURITY = 0x00080000L;
+  private static final long ALWAYS_SIGN = 0x00008000L;
+  private static final long NEGOTIATE_OEM_WORKSTATION_SUPPLIED = 0x00002000L;
+  private static final long NEGOTIATE_OEM_DOMAIN_SUPPLIED = 0x00001000L;
+  private static final long NTLM = 0x00000200L;
+  private static final long REQUEST_TARGET = 0x00000004L;
+  private static final long NEGOTIATE_OEM = 0x00000002L;
+  private static final long UNICODE = 0x00000001L;
+
+  /** Base negotiate flags common to all dialects ({@code 0xb204}). */
+  private static final long BASE_FLAGS =
+      ALWAYS_SIGN
+          | NEGOTIATE_OEM_WORKSTATION_SUPPLIED
+          | NEGOTIATE_OEM_DOMAIN_SUPPLIED
+          | NTLM
+          | REQUEST_TARGET;
+
+  /** Default negotiate flags for the NTLMv2 dialect ({@code 0xa208b205}). */
+  private static final long NTLMV2_FLAGS =
+      BASE_FLAGS
+          | NEGOTIATE_56
+          | NEGOTIATE_128
+          | NEGOTIATE_VERSION
+          | NEGOTIATE_EXTENDED_SESSION_SECURITY
+          | UNICODE;
+
+  /** Default negotiate flags for the NTLM2 session-response dialect ({@code 0xa208b207}). */
+  private static final long NTLM2SR_FLAGS = NTLMV2_FLAGS | NEGOTIATE_OEM;
+
+  /** Default negotiate flags for the NT-only dialect ({@code 0xb205}). */
+  private static final long NT_FLAGS = BASE_FLAGS | UNICODE;
+
+  /** Default negotiate flags for the LM-only dialect ({@code 0xb206}). */
+  private static final long LM_FLAGS = BASE_FLAGS | NEGOTIATE_OEM;
+
+  /** Default negotiate flags for the combined NT+LM dialect ({@code 0xb207}). */
+  private static final long NTLM_FLAGS = NT_FLAGS | LM_FLAGS;
+
   private static final SecureRandom RANDOM = new SecureRandom();
 
   private NtlmMessages() {}
@@ -61,23 +103,13 @@ public final class NtlmMessages {
   }
 
   private static long getFlags(Credentials creds) {
-    final long flags;
-    if (creds.getFlags() != 0) {
-      flags = creds.getFlags();
-    } else if (creds.getHashNtlm2() != 0) {
-      flags = 0xa208b205L;
-    } else if (creds.getHashNt() == 2) {
-      flags = 0xa208b207L;
-    } else if (creds.getHashNt() != 0 && creds.getHashLm() != 0) {
-      flags = 0xb207L;
-    } else if (creds.getHashNt() != 0) {
-      flags = 0xb205L;
-    } else if (creds.getHashLm() != 0) {
-      flags = 0xb206L;
-    } else {
-      throw new IllegalStateException("No NTLM hash configured in credentials");
-    }
-    return flags;
+    if (creds.getFlags() != 0) return creds.getFlags();
+    if (creds.getHashNtlm2() != 0) return NTLMV2_FLAGS;
+    if (creds.getHashNt() == 2) return NTLM2SR_FLAGS;
+    if (creds.getHashNt() != 0 && creds.getHashLm() != 0) return NTLM_FLAGS;
+    if (creds.getHashNt() != 0) return NT_FLAGS;
+    if (creds.getHashLm() != 0) return LM_FLAGS;
+    throw new IllegalStateException("No NTLM hash configured in credentials");
   }
 
   /**
