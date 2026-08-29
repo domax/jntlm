@@ -31,7 +31,16 @@ configurations {
 }
 
 group = 'net.domax'
-version = '1.0-SNAPSHOT'
+
+// Single source of truth for the application version: jntlm.version in
+// src/main/resources/application.yml. It drives the JAR file name and manifest.
+def appConfigFile = file('src/main/resources/application.yml')
+def appVersionMatcher = (appConfigFile.text =~ /(?m)^\s{2}version:\s*["']?([^"'\s#]+)/)
+if (!appVersionMatcher) {
+  throw new GradleException("Could not find 'jntlm.version' in ${appConfigFile}")
+}
+//noinspection GroovyAssignabilityCheck
+version = appVersionMatcher[0][1]
 
 dependencies {
   implementation platform('org.springframework.boot:spring-boot-dependencies:4.0.0')
@@ -48,6 +57,15 @@ dependencies {
   annotationProcessor 'org.projectlombok:lombok'
   testCompileOnly 'org.projectlombok:lombok'
   testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+bootJar {
+  manifest {
+    attributes(
+      'Implementation-Title': project.name,
+      'Implementation-Version': project.version
+    )
+  }
 }
 
 test {
