@@ -114,6 +114,6 @@ public final class HttpMessage {
 
   @Override
   public String toString() {
-    return startLine() + "; " + headers;
+    return startLine() + " " + headers;
   }
 }

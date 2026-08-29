@@ -37,6 +37,10 @@ public class ProxyServer implements SmartLifecycle {
   private ServerSocket serverSocket;
   private Thread acceptThread;
 
+  /**
+   * Starts the proxy server: binds the listening socket and starts the accept loop. If already
+   * running, does nothing.
+   */
   @Override
   public synchronized void start() {
     if (running) return;
@@ -78,6 +82,10 @@ public class ProxyServer implements SmartLifecycle {
         socket.setTcpNoDelay(true);
         val client = new Endpoint(socket);
         clientExecutor.execute(new ClientConnectionHandler(client, forwarder));
+        log.atDebug()
+            .setMessage("Accepted client connection from {}")
+            .addArgument(socket::getRemoteSocketAddress)
+            .log();
       } catch (IOException e) {
         log.warn("Failed to set up client connection: {}", e.getMessage());
         closeQuietly(socket);
@@ -85,6 +93,10 @@ public class ProxyServer implements SmartLifecycle {
     }
   }
 
+  /**
+   * Stops the proxy server: closes the listening socket, interrupts the accept thread, and shuts
+   * down the client executor. If already stopped, does nothing.
+   */
   @Override
   public synchronized void stop() {
     if (!running) return;

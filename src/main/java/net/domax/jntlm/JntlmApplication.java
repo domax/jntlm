@@ -1,9 +1,11 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm;
 
+import lombok.val;
 import net.domax.jntlm.config.JntlmProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.ApplicationPidFileWriter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
@@ -18,6 +20,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 public class JntlmApplication {
 
   public static void main(String[] args) {
-    SpringApplication.run(JntlmApplication.class, args);
+    val app = new SpringApplication(JntlmApplication.class);
+    app.addListeners(new ApplicationPidFileWriter());
+    app.run(args);
   }
 }

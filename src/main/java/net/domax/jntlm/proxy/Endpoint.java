@@ -5,10 +5,11 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 
 /**
  * A TCP endpoint (client or parent proxy) wrapping a {@link Socket} with buffered streams.
@@ -17,6 +18,8 @@ import java.net.SocketTimeoutException;
  * it peeks a single byte with a short timeout to detect whether the remote side has closed the
  * connection, without consuming pending data.
  */
+@Getter
+@Accessors(fluent = true)
 public final class Endpoint implements Closeable {
 
   private final Socket socket;
@@ -27,18 +30,6 @@ public final class Endpoint implements Closeable {
     this.socket = socket;
     this.in = new BufferedInputStream(socket.getInputStream());
     this.out = new BufferedOutputStream(socket.getOutputStream());
-  }
-
-  public Socket socket() {
-    return socket;
-  }
-
-  public InputStream in() {
-    return in;
-  }
-
-  public OutputStream out() {
-    return out;
   }
 
   /**

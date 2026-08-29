@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import lombok.val;
+import org.jspecify.annotations.NonNull;
 
 /**
  * An ordered, case-insensitive, multivalued collection of HTTP headers.
@@ -16,7 +17,13 @@ import lombok.val;
 public final class HttpHeaders {
 
   /** A single header line, preserving the original name casing. */
-  public record Header(String name, String value) {}
+  public record Header(String name, String value) {
+
+    @NonNull @Override
+    public String toString() {
+      return name + "=" + value;
+    }
+  }
 
   private final List<Header> headers = new ArrayList<>();
 

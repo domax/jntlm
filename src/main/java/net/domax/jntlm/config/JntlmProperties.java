@@ -16,6 +16,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "jntlm")
 public class JntlmProperties {
 
+  /** Version string, bound from {@code jntlm.version}. */
+  private String version = "0.0.0";
+
   /** Local address to bind the proxy listener to. Default loopback only. */
   private String listenAddress = "127.0.0.1";
 

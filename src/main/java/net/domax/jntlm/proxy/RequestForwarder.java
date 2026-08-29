@@ -200,11 +200,16 @@ public class RequestForwarder {
           // --- send headers (loop 0 -> parent, loop 1 -> client) ---
           val current = (loop == 0) ? data0 : data1;
           val wOut = (loop == 0) ? server.out() : client.out();
-          log.debug(
-              "Forwarding {} {} to {}",
-              loop == 0 ? "request" : "response",
-              current,
-              loop == 0 ? "server" : "client");
+
+          log.atDebug()
+              .setMessage("Forwarding {} {} to {}")
+              .addArgument(loop == 0 ? "request" : "response")
+              .addArgument(current)
+              .addArgument(
+                  loop == 0
+                      ? server.socket()::getRemoteSocketAddress
+                      : client.socket()::getRemoteSocketAddress)
+              .log();
           try {
             HttpIo.sendHeaders(wOut, current);
           } catch (IOException e) {
@@ -215,7 +220,11 @@ public class RequestForwarder {
           // --- CONNECT tunnel: once the parent says 200, pump bytes both ways ---
           if (loop == 1 && data0.isConnect() && data1.getCode() == 200) {
             try {
-              log.debug("Tunneling {}", data0);
+              log.atDebug()
+                  .setMessage("Tunneling: {} <-> {}")
+                  .addArgument(client.socket()::getRemoteSocketAddress)
+                  .addArgument(server.socket()::getRemoteSocketAddress)
+                  .log();
               HttpIo.tunnel(
                   client.in(),
                   client.out(),
