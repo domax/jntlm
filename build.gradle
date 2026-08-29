@@ -60,6 +60,7 @@ dependencies {
 }
 
 bootJar {
+  exclude 'application-local.yml'
   manifest {
     attributes(
       'Implementation-Title': project.name,

@@ -11,3 +11,4 @@
 # Zeppelin ignored files
 /ZeppelinRemoteNotebooks/
 /inspectionProfiles/Project_Default.xml
+/db-forest-config.xml

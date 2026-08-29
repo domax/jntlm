@@ -8,6 +8,7 @@ spring:
   pid:
     file: ./jntlm.pid
     fail-on-write-error: true
+  profiles.include: custom
 
 jntlm:
   version: "1.0.0"
