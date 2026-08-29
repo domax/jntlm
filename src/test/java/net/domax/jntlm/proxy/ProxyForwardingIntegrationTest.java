@@ -80,6 +80,7 @@ class ProxyForwardingIntegrationTest {
     t.join(2000);
   }
 
+  @SuppressWarnings({"java:S6126", "TextBlockMigration"})
   @Test
   void reusesAuthenticatedConnectionForSecondRequest() throws Exception {
     // Both requests travel over one client connection; forward()'s keep-alive loop serves the
@@ -118,6 +119,7 @@ class ProxyForwardingIntegrationTest {
     t.join(2000);
   }
 
+  @SuppressWarnings("StatementWithEmptyBody")
   @Test
   void tunnelsConnectRequests() throws Exception {
     Socket testClient = new Socket();
@@ -138,12 +140,11 @@ class ProxyForwardingIntegrationTest {
     String statusLine = readLine(in);
     assertTrue(statusLine.contains("200"), "CONNECT should establish the tunnel: " + statusLine);
     // consume remaining response headers
-    String line;
-    while (!(line = readLine(in)).isEmpty()) {
+    while (!readLine(in).isEmpty()) {
       // skip
     }
 
-    // The mock relays tunnelled bytes back upper-cased, proving the client's bytes reached the
+    // The mock relays tunneled bytes back upper-cased, proving the client's bytes reached the
     // parent and the parent's response reached the client (a self-echoing tunnel would fail).
     out.write("ping".getBytes(StandardCharsets.ISO_8859_1));
     out.flush();
@@ -304,7 +305,7 @@ class ProxyForwardingIntegrationTest {
           sb.append((char) c);
         }
       }
-      if (!any && sb.length() == 0) {
+      if (!any && sb.isEmpty()) {
         return null;
       }
       return sb.toString();
@@ -349,9 +350,9 @@ class ProxyForwardingIntegrationTest {
       out.flush();
     }
 
+    @SuppressWarnings("java:S6126")
     private static void sendConnectEstablished(OutputStream out) throws IOException {
-      String resp =
-          "HTTP/1.1 200 Connection established\r\n" + "Proxy-Connection: keep-alive\r\n\r\n";
+      String resp = "HTTP/1.1 200 Connection established\r\nProxy-Connection: keep-alive\r\n\r\n";
       out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
       out.flush();
     }

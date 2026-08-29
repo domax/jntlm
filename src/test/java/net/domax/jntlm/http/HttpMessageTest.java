@@ -3,6 +3,7 @@ package net.domax.jntlm.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,7 @@ class HttpMessageTest {
     assertEquals(10, HttpMessage.newRequest("GET", "/", "HTTP/1.0").getHttpVersion());
   }
 
+  @SuppressWarnings("java:S6126")
   @Test
   void recvHeadersParsesRequestLineAndHeaders() throws Exception {
     String raw =
@@ -70,6 +72,7 @@ class HttpMessageTest {
             + "Proxy-Connection: keep-alive\r\n\r\n";
     HttpMessage m =
         HttpIo.recvHeaders(new ByteArrayInputStream(raw.getBytes(StandardCharsets.ISO_8859_1)));
+    assertNotNull(m);
     assertTrue(m.isRequest());
     assertEquals("GET", m.getMethod());
     assertEquals(11, m.getHttpVersion());
