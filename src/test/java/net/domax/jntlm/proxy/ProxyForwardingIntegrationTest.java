@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.domax.jntlm.config.CredentialsFactory;
+import net.domax.jntlm.config.JntlmConfig;
 import net.domax.jntlm.config.JntlmProperties;
 import net.domax.jntlm.http.HttpMessage;
 import net.domax.jntlm.ntlm.Credentials;
@@ -45,7 +45,7 @@ class ProxyForwardingIntegrationTest {
     props.getCredentials().setPassword("SecREt01");
     props.getCredentials().setWorkstation("WS");
 
-    Credentials creds = new CredentialsFactory().globalCredentials(props);
+    Credentials creds = new JntlmConfig().globalCredentials(props);
     ConnectionPool pool = new ConnectionPool();
     ParentProxyManager manager = new ParentProxyManager(props, pool);
     ProxyAuthenticator auth = new ProxyAuthenticator(manager);

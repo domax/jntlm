@@ -4,8 +4,6 @@ package net.domax.jntlm.http;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import lombok.EqualsAndHashCode;
-import lombok.ToString;
 import lombok.val;
 
 /**
@@ -15,8 +13,6 @@ import lombok.val;
  * case-insensitively, and duplicate header names are allowed. Provides the small set of operations
  * the proxy logic needs (add, replace/modify, delete, get, and token search).
  */
-@ToString
-@EqualsAndHashCode
 public final class HttpHeaders {
 
   /** A single header line, preserving the original name casing. */
@@ -91,5 +87,10 @@ public final class HttpHeaders {
 
   public boolean isEmpty() {
     return headers.isEmpty();
+  }
+
+  @Override
+  public String toString() {
+    return headers.toString();
   }
 }

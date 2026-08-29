@@ -3,12 +3,13 @@ package net.domax.jntlm.proxy;
 
 import java.io.IOException;
 import java.util.Base64;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 import net.domax.jntlm.http.HttpIo;
 import net.domax.jntlm.http.HttpMessage;
 import net.domax.jntlm.ntlm.Credentials;
 import net.domax.jntlm.ntlm.NtlmMessages;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,18 +29,15 @@ import org.springframework.stereotype.Component;
  *
  * The caller ({@link RequestForwarder}) then sends the now-authorized {@code request}.
  */
+@Slf4j
+@RequiredArgsConstructor
 @Component
 public class ProxyAuthenticator {
 
-  private static final Logger log = LoggerFactory.getLogger(ProxyAuthenticator.class);
-
   private static final int NTLM_CHALLENGE_MIN = 40;
+  private static final byte[] NO_CHALLENGE = new byte[0];
 
   private final ParentProxyManager parentProxyManager;
-
-  public ProxyAuthenticator(ParentProxyManager parentProxyManager) {
-    this.parentProxyManager = parentProxyManager;
-  }
 
   /**
    * Result of an authentication attempt.
@@ -54,20 +52,19 @@ public class ProxyAuthenticator {
    * Runs the handshake on {@code server}. On success, if the proxy required authentication, {@code
    * request} is mutated to carry the final NTLM {@code Proxy-Authorization} header.
    */
+  @SuppressWarnings("java:S3776") // Cognitive Complexity
   public AuthResult authenticate(Endpoint server, HttpMessage request, Credentials creds) {
     // Type-1 (negotiate) message.
-    byte[] type1 = NtlmMessages.type1Request(creds);
-    String type1Header = "NTLM " + Base64.getEncoder().encodeToString(type1);
+    val type1 = NtlmMessages.type1Request(creds);
+    val type1Header = "NTLM " + Base64.getEncoder().encodeToString(type1);
 
-    HttpMessage probe = request.copy();
+    val probe = request.copy();
     probe.getHeaders().modify("Proxy-Authorization", type1Header);
 
     boolean pretend407 = request.isHead() || HttpIo.httpHasBody(request, null) != 0;
 
     // Some ISA proxies reject HEAD auth requests; probe as GET.
-    if (request.isHead()) {
-      probe.setMethod("GET");
-    }
+    if (request.isHead()) probe.setMethod("GET");
     probe.getHeaders().modify("Content-Length", "0");
     probe.getHeaders().remove("Transfer-Encoding");
 
@@ -78,7 +75,7 @@ public class ProxyAuthenticator {
       return new AuthResult(false, server, null);
     }
 
-    HttpMessage reply;
+    final HttpMessage reply;
     try {
       reply = HttpIo.recvHeaders(server.in());
     } catch (IOException e) {
@@ -95,21 +92,19 @@ public class ProxyAuthenticator {
         // Consume the challenge body so the connection can be reused.
         HttpIo.dropBody(server.in(), reply);
 
-        String challengeHeader = reply.getHeaders().getFirst("Proxy-Authenticate");
+        val challengeHeader = reply.getHeaders().getFirst("Proxy-Authenticate");
         if (challengeHeader != null) {
-          byte[] challenge = decodeChallenge(challengeHeader);
-          if (challenge != null && challenge.length > NTLM_CHALLENGE_MIN) {
-            byte[] type3 = NtlmMessages.type3Response(challenge, creds);
-            String type3Header = "NTLM " + Base64.getEncoder().encodeToString(type3);
+          val challenge = decodeChallenge(challengeHeader);
+          if (challenge.length > NTLM_CHALLENGE_MIN) {
+            val type3 = NtlmMessages.type3Response(challenge, creds);
+            val type3Header = "NTLM " + Base64.getEncoder().encodeToString(type3);
             request.getHeaders().modify("Proxy-Authorization", type3Header);
           } else {
             log.error("Proxy returned an invalid NTLM challenge");
             server.close();
             return new AuthResult(false, server, null);
           }
-        } else {
-          log.warn("No Proxy-Authenticate header - NTLM/Negotiate not supported?");
-        }
+        } else log.warn("No Proxy-Authenticate header - NTLM/Negotiate not supported?");
       } else if (pretend407) {
         // No auth was demanded, but we only sent a probe - force the caller to re-issue.
         reply.setCode(407);
@@ -121,7 +116,7 @@ public class ProxyAuthenticator {
     }
 
     // If the proxy closed the connection on us, reconnect for the caller.
-    Endpoint activeServer = server;
+    var activeServer = server;
     if (server.isPeerClosed()) {
       log.debug("Parent proxy closed the connection; reconnecting");
       server.close();
@@ -137,16 +132,15 @@ public class ProxyAuthenticator {
 
   /** Decodes the base64 NTLM Type-2 challenge from a {@code Proxy-Authenticate} header value. */
   private static byte[] decodeChallenge(String header) {
-    String h = header.trim();
-    if (h.length() < 5) {
-      return null;
-    }
+    val h = header.trim();
+    if (h.length() < 5) return NO_CHALLENGE;
+
     // Skip the "NTLM " (or "NTLM"/"Negotiate ") scheme prefix, as CNTLM does (tmp + 5).
-    String b64 = h.substring(5).trim();
+    val b64 = h.substring(5).trim();
     try {
       return Base64.getDecoder().decode(b64);
     } catch (IllegalArgumentException e) {
-      return null;
+      return NO_CHALLENGE;
     }
   }
 }

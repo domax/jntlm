@@ -1,8 +1,8 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.proxy;
 
-import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import net.domax.jntlm.ntlm.Credentials;
 import org.springframework.stereotype.Component;
 
@@ -20,15 +20,15 @@ public class ConnectionPool {
   /** A pooled parent-proxy connection together with the credentials it was authenticated with. */
   public record PooledConnection(Endpoint endpoint, Credentials credentials) {}
 
-  private final Deque<PooledConnection> pool = new ArrayDeque<>();
+  private final Deque<PooledConnection> pool = new ConcurrentLinkedDeque<>();
 
   /** Removes and returns a cached connection, or {@code null} if the pool is empty. */
-  public synchronized PooledConnection pop() {
+  public PooledConnection pop() {
     return pool.pollFirst();
   }
 
   /** Adds an authenticated connection to the pool for later reuse. */
-  public synchronized void add(Endpoint endpoint, Credentials credentials) {
+  public void add(Endpoint endpoint, Credentials credentials) {
     pool.addFirst(new PooledConnection(endpoint, credentials));
   }
 
@@ -36,10 +36,8 @@ public class ConnectionPool {
    * Closes and discards every cached connection. Called when the active parent proxy changes
    * (mirrors the cache flush in CNTLM's {@code proxy_connect}).
    */
-  public synchronized void invalidateAll() {
+  public void invalidateAll() {
     PooledConnection c;
-    while ((c = pool.pollFirst()) != null) {
-      c.endpoint().close();
-    }
+    while ((c = pool.pollFirst()) != null) c.endpoint().close();
   }
 }

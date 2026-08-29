@@ -6,9 +6,10 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 import net.domax.jntlm.config.JntlmProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,32 +19,24 @@ import org.springframework.stereotype.Component;
  * "current" parent is used by all connections; when it fails, a round-robin scan finds the next
  * working parent, migrates everyone to it and flushes the cached-connection pool.
  */
+@Slf4j
 @Component
 public class ParentProxyManager {
-
-  private static final Logger log = LoggerFactory.getLogger(ParentProxyManager.class);
 
   private static final int CONNECT_TIMEOUT_MS = 10_000;
 
   private final List<ParentProxy> parents = new ArrayList<>();
   private final ConnectionPool connectionPool;
 
-  private int current;
+  private final AtomicInteger current = new AtomicInteger();
 
   public ParentProxyManager(JntlmProperties properties, ConnectionPool connectionPool) {
     this.connectionPool = connectionPool;
-    for (String spec : properties.getParents()) {
-      if (spec != null && !spec.isBlank()) {
-        parents.add(ParentProxy.parse(spec));
-      }
-    }
-    if (parents.isEmpty()) {
-      throw new IllegalStateException("No parent proxies configured (jntlm.parents)");
-    }
-  }
+    for (val spec : properties.getParents())
+      if (spec != null && !spec.isBlank()) parents.add(ParentProxy.parse(spec));
 
-  public List<ParentProxy> getParents() {
-    return List.copyOf(parents);
+    if (parents.isEmpty())
+      throw new IllegalStateException("No parent proxies configured (jntlm.parents)");
   }
 
   /**
@@ -55,16 +48,14 @@ public class ParentProxyManager {
    * @throws IOException if no parent proxy on the list can be reached
    */
   public Socket connect() throws IOException {
-    int start;
-    synchronized (this) {
-      start = current;
-    }
+    final int start;
+    start = current.get();
 
-    for (int i = 0; i < parents.size(); i++) {
+    for (int i = 0; i < parents.size(); ++i) {
       int idx = (start + i) % parents.size();
-      ParentProxy p = parents.get(idx);
+      val p = parents.get(idx);
       try {
-        Socket socket = new Socket();
+        val socket = new Socket();
         socket.connect(new InetSocketAddress(p.host(), p.port()), CONNECT_TIMEOUT_MS);
         socket.setTcpNoDelay(true);
         if (idx != start) {
@@ -80,8 +71,8 @@ public class ParentProxyManager {
   }
 
   /** Updates the active parent and flushes cached connections bound to the previous parent. */
-  private synchronized void onParentSwitched(int newIndex) {
+  private void onParentSwitched(int newIndex) {
     connectionPool.invalidateAll();
-    current = newIndex;
+    current.set(newIndex);
   }
 }

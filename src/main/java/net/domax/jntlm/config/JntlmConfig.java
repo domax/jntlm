@@ -8,6 +8,8 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.ntlm.Credentials;
@@ -24,8 +26,16 @@ import org.springframework.context.annotation.Configuration;
  */
 @Slf4j
 @Configuration
-public class CredentialsFactory {
+public class JntlmConfig {
 
+  /** Creates a virtual-thread-per-task executor for handling client connections. */
+  @Bean
+  ExecutorService clientExecutor() {
+    return Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("jntlm-client-", 0).factory());
+  }
+
+  /** Creates the global NTLM credentials from the configured properties. */
   @Bean
   public Credentials globalCredentials(JntlmProperties properties) {
     val src = properties.getCredentials();
@@ -46,7 +56,7 @@ public class CredentialsFactory {
     creds.setWorkstation(
         ofNullable(src.getWorkstation())
             .filter(not(String::isBlank))
-            .orElseGet(CredentialsFactory::defaultWorkstation));
+            .orElseGet(JntlmConfig::defaultWorkstation));
 
     // Select the dialect (sets hashNt/hashLm/hashNtlm2) and optional manual flags.
     properties.getAuth().applyTo(creds);

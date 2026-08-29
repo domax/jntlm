@@ -111,4 +111,9 @@ public final class HttpMessage {
     for (val h : this.headers.all()) m.headers.add(h.name(), h.value());
     return m;
   }
+
+  @Override
+  public String toString() {
+    return startLine() + "; " + headers;
+  }
 }

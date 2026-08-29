@@ -10,3 +10,4 @@
 /dataSources.local.xml
 # Zeppelin ignored files
 /ZeppelinRemoteNotebooks/
+/inspectionProfiles/Project_Default.xml

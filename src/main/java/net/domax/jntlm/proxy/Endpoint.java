@@ -42,27 +42,26 @@ public final class Endpoint implements Closeable {
   }
 
   /**
-   * Returns true if the peer has closed the connection. Peeks one byte under a 1&nbsp;ms read
-   * timeout: EOF means closed; a byte means still open (and is pushed back); a timeout means open
-   * with no pending data.
+   * Returns true if the peer has closed the connection. Peeks one byte under a 1ms read timeout:
+   * EOF means closed; a byte means still open (and is pushed back); a timeout means open with no
+   * pending data.
    */
   public boolean isPeerClosed() {
-    if (socket.isClosed() || !socket.isConnected()) {
-      return true;
-    }
+    if (socket.isClosed() || !socket.isConnected()) return true;
+
     int oldTimeout;
     try {
       oldTimeout = socket.getSoTimeout();
     } catch (IOException e) {
       return true;
     }
+
     try {
       socket.setSoTimeout(1);
       in.mark(2);
       int b = in.read();
-      if (b == -1) {
-        return true;
-      }
+      if (b == -1) return true;
+
       in.reset();
       return false;
     } catch (SocketTimeoutException e) {
@@ -81,9 +80,7 @@ public final class Endpoint implements Closeable {
   @Override
   public void close() {
     try {
-      if (!socket.isClosed()) {
-        socket.close();
-      }
+      if (!socket.isClosed()) socket.close();
     } catch (IOException ignored) {
       // ignore
     }

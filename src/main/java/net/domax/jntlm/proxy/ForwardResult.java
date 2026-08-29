@@ -8,12 +8,12 @@ import net.domax.jntlm.http.HttpMessage;
  * forward_request}:
  *
  * <ul>
- *   <li>{@link #close()} &mdash; the client connection must be closed (CNTLM {@code return -1});
- *   <li>{@link #done()} &mdash; the request/response cycle completed and the client connection may
- *       be kept alive (CNTLM {@code return NULL});
- *   <li>{@link #reroute(HttpMessage)} &mdash; the (pinned) parent connection cannot serve this
- *       request because its target host changed; the already-read request is handed back so the
- *       caller re-forwards it on a fresh connection (CNTLM {@code return rr_data}).
+ *   <li>{@link #close()}: the client connection must be closed (CNTLM {@code return -1});
+ *   <li>{@link #done()}: the request/response cycle completed and the client connection may be kept
+ *       alive (CNTLM {@code return NULL});
+ *   <li>{@link #reroute(HttpMessage)}: the (pinned) parent connection cannot serve this request
+ *       because its target host changed; the already-read request is handed back so the caller
+ *       re-forwards it on a fresh connection (CNTLM {@code return rr_data}).
  * </ul>
  */
 public record ForwardResult(Type type, HttpMessage rerouteRequest) {

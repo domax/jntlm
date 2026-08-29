@@ -2,13 +2,13 @@
 package net.domax.jntlm.server;
 
 import java.io.IOException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 import net.domax.jntlm.http.HttpIo;
-import net.domax.jntlm.http.HttpMessage;
 import net.domax.jntlm.proxy.Endpoint;
 import net.domax.jntlm.proxy.ForwardResult;
 import net.domax.jntlm.proxy.RequestForwarder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Handles a single client connection for its whole lifetime &mdash; a port of CNTLM's {@code
@@ -19,36 +19,27 @@ import org.slf4j.LoggerFactory;
  * parent connection targeted a different host); the request is immediately re-forwarded on a fresh
  * connection. The loop ends when the forwarder asks to close or the client stops sending requests.
  */
+@Slf4j
+@RequiredArgsConstructor
 public final class ClientConnectionHandler implements Runnable {
-
-  private static final Logger log = LoggerFactory.getLogger(ClientConnectionHandler.class);
 
   private final Endpoint client;
   private final RequestForwarder forwarder;
 
-  public ClientConnectionHandler(Endpoint client, RequestForwarder forwarder) {
-    this.client = client;
-    this.forwarder = forwarder;
-  }
-
+  @SuppressWarnings("java:S135")
   @Override
   public void run() {
     try {
       while (true) {
-        HttpMessage request = HttpIo.recvHeaders(client.in());
-        if (request == null) {
-          break;
-        }
+        val request = HttpIo.recvHeaders(client.in());
+        if (request == null) break;
 
-        ForwardResult result = forwarder.forward(client, request);
+        var result = forwarder.forward(client, request);
         // Follow reroutes until the request is actually served.
-        while (result.type() == ForwardResult.Type.REROUTE) {
+        while (result.type() == ForwardResult.Type.REROUTE)
           result = forwarder.forward(client, result.rerouteRequest());
-        }
 
-        if (result.type() == ForwardResult.Type.CLOSE) {
-          break;
-        }
+        if (result.type() == ForwardResult.Type.CLOSE) break;
         // DONE: keep the client connection open for the next request (HTTP keep-alive).
       }
     } catch (IOException e) {
