@@ -1,8 +1,10 @@
+
 plugins {
   id 'java'
   id 'application'
   id 'jacoco'
   id 'idea'
+  id 'maven-publish'
   id 'com.diffplug.spotless' version "7.0.3"
   id 'io.spring.dependency-management' version '1.1.7'
   id 'org.springframework.boot' version '4.0.6'
@@ -42,10 +44,12 @@ if (!appVersionMatcher) {
 //noinspection GroovyAssignabilityCheck
 version = appVersionMatcher[0][1]
 
+def springBootPlatform = 'org.springframework.boot:spring-boot-dependencies:4.0.6'
+
 dependencies {
-  implementation platform('org.springframework.boot:spring-boot-dependencies:4.0.6')
-  annotationProcessor platform('org.springframework.boot:spring-boot-dependencies:4.0.6')
-  testImplementation platform('org.springframework.boot:spring-boot-dependencies:4.0.6')
+  implementation platform(springBootPlatform)
+  annotationProcessor platform(springBootPlatform)
+  testImplementation platform(springBootPlatform)
 
   implementation 'org.springframework.boot:spring-boot-starter'
   annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
@@ -96,6 +100,27 @@ spotless {
     formatAnnotations()
     // make sure every file has the following copyright header.
     licenseHeader '/* JNTLM © Licensed under MIT $YEAR. */'
+  }
+}
+
+publishing {
+  repositories {
+    maven {
+      name = "GitHubPackages"
+      url = uri("https://maven.pkg.github.com/domax/jntlm")
+      credentials {
+        username = project.findProperty("gpr.user") ?: System.getenv("USERNAME")
+        password = project.findProperty("gpr.key") ?: System.getenv("TOKEN")
+      }
+    }
+  }
+  publications {
+    //noinspection GroovyAssignabilityCheck
+    gpr(MavenPublication) {
+      //from components.java
+      //noinspection GroovyAssignabilityCheck
+      artifact bootJar
+    }
   }
 }
 
