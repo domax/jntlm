@@ -97,7 +97,7 @@ bin/jntlm                        # start/stop/restart/status/log control script
   (`new RequestForwarder(manager, pool, auth, creds)`).
 - **Run locally:** activate the `local` profile — `application-local.yml` overrides `parents`,
   `flags`, and log levels for a real corporate proxy:
-  ```bash
+  ```shell
   ./gradlew bootRun --args='--spring.profiles.active=local'
   ```
 - **Run the built jar / deploy:** use the `bin/jntlm` control script (see below).
@@ -131,7 +131,7 @@ It honors `JAVA_HOME` (falls back to `java` on `PATH`) and `JAVA_OPTS`
 
 The script is native here — it uses `readlink -f`, `ps -p`, and `kill`:
 
-```bash
+```shell
 chmod +x jntlm          # first time only
 ./jntlm start
 ./jntlm status
@@ -152,7 +152,7 @@ stopping the process:
 - **Git Bash / MSYS2 / Cygwin:** `./jntlm start`, `./jntlm status`, `./jntlm stop`.
 - **WSL:** works as on Linux; use a Linux JDK inside the WSL distro.
 - **Plain `cmd.exe` / PowerShell:** the script won't run directly — start the jar yourself:
-  ```powershell
+  ```shell
   java --Xmx256m -server -Djava.awt.headless=true -jar jntlm.jar
   ```
 
