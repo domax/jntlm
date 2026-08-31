@@ -1,4 +1,14 @@
-# jntlm
+# JNTLM — Java NTLM-authenticating HTTP proxy
+
+[![Made with Java](https://img.shields.io/badge/Java-21-blue?logo=openjdk&logoColor=white)](https://openjdk.org "OpenJDK homepage")
+[![Made with Spring Boot](https://img.shields.io/badge/SpringBoot-4-blue?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot "Spring Boot homepage")
+[![GitHub License](https://img.shields.io/github/license/domax/jntlm)](https://opensource.org/licenses/MIT "MIT License page")
+[![CodeQL](https://github.com/domax/jntlm/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/domax/jntlm/actions/workflows/github-code-scanning/codeql)
+[![Gradle Package](https://github.com/domax/jntlm/actions/workflows/gradle-publish.yml/badge.svg)](https://github.com/domax/jntlm/actions/workflows/gradle-publish.yml)
+
+[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy+me+a+coffee&emoji=&slug=domax&button_colour=F9A154&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=FFFFFF)](https://www.buymeacoffee.com/domax)
+
+---
 
 A Java 21 / Spring Boot rewrite of the [CNTLM](https://cntlm.sourceforge.net/)
 NTLM-authenticating HTTP proxy. It listens locally (unauthenticated) and transparently performs the
@@ -94,9 +104,9 @@ bin/jntlm                        # start/stop/restart/status/log control script
 
 ## Control script (`bin/jntlm`)
 
-`bin/jntlm` is the recommended POSIX control command for running JNTLM as a background service. It
-resolves its own directory (`APP_HOME`) and expects three files side by side, all sharing the
-script's base name:
+A [jntlm](bin/jntlm) script is the recommended POSIX control command for running JNTLM as a
+background service. It resolves its own directory (`APP_HOME`) and expects three files side by side,
+all sharing the script's base name:
 
 ```
 <dir>/jntlm                     # the control script itself (may be symlinked; see below)
@@ -205,4 +215,4 @@ separate `local` profile — `application-local.yml`, excluded from the jar — 
 
 ## License
 
-[MIT](LICENSE.txt).
+[MIT](LICENSE.txt)
