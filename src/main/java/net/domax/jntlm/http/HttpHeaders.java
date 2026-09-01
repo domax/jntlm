@@ -79,8 +79,7 @@ public final class HttpHeaders {
   }
 
   /** Returns the value of the first header with the given name, or {@code null}. */
-  @Nullable
-  public String getFirst(String name) {
+  @Nullable public String getFirst(String name) {
     return ofNullable(headers.get(getKey(name))).stream()
         .flatMap(h -> h.values.stream())
         .findFirst()
