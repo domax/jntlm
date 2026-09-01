@@ -68,24 +68,6 @@ proxy**.
       builds the global `Credentials` bean;
     - `AuthMode` maps dialects to hash switches.
 
-## Project layout
-
-```
-src/main/java/net/domax/jntlm/
-├── JntlmApplication.java        # Spring Boot entry point (writes a PID file)
-├── config/                      # JntlmProperties, JntlmConfig, AuthMode
-├── server/                      # ProxyServer, ClientConnectionHandler
-├── proxy/                       # RequestForwarder, ProxyAuthenticator, ConnectionPool,
-│                                #   ParentProxyManager, Endpoint, ForwardResult, ErrorPages
-├── ntlm/                        # NtlmMessages, NtlmHashes, NtlmCrypto, Md4, Le, Credentials
-└── http/                        # HttpIo, HttpMessage, HttpHeaders
-src/main/resources/
-├── application.yml              # Defaults + jntlm.version (single source of truth)
-├── application-local.yml        # Local dev overrides (excluded from the boot jar)
-└── banner.txt
-bin/jntlm                        # start/stop/restart/status/log control script
-```
-
 ## Developer workflows
 
 - **Build:** `./gradlew build` — Java 21 toolchain, Spring Boot 4.
@@ -119,7 +101,7 @@ Commands (`APP_NAME` = "JNTLM Proxy Server"):
 | Command   | Effect                                                                                                               |
 |-----------|----------------------------------------------------------------------------------------------------------------------|
 | `start`   | Verifies Java 21+, launches the jar detached, writes `jntlm.pid`, logs to `jntlm.log`.                               |
-| `stop`    | Kills the PID, removes the pid file, and rotates `jntlm.log` to a timestamped file (purging logs older than 6 days). |
+| `stop`    | Kills the PID, removes the pid file, and rotates `jntlm.log` to a timestamped file (purging logs older than 7 days). |
 | `restart` | `stop` then `start`.                                                                                                 |
 | `status`  | Reports whether the service is running (via the pid file), exits non-zero otherwise.                                 |
 | `log`     | Opens the most recent log file with `less`.                                                                          |
