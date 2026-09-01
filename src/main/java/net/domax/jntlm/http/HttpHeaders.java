@@ -1,35 +1,62 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.http;
 
-import java.util.ArrayList;
+import static java.util.Optional.ofNullable;
+
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import lombok.NoArgsConstructor;
 import lombok.val;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An ordered, case-insensitive, multivalued collection of HTTP headers.
  *
- * <p>Mirrors the behaviour of CNTLM's {@code hlist_t}: header order is preserved, names are matched
+ * <p>Mirrors the behavior of CNTLM's {@code hlist_t}: header order is preserved, names are matched
  * case-insensitively, and duplicate header names are allowed. Provides the small set of operations
  * the proxy logic needs (add, replace/modify, delete, get, and token search).
  */
+@NoArgsConstructor
+@NullMarked
 public final class HttpHeaders {
+
+  private record InnerHeader(String name, Set<String> values) {
+
+    InnerHeader copy() {
+      return new InnerHeader(name, new LinkedHashSet<>(values));
+    }
+  }
 
   /** A single header line, preserving the original name casing. */
   public record Header(String name, String value) {
 
-    @NonNull @Override
+    @Override
     public String toString() {
       return name + "=" + value;
     }
   }
 
-  private final List<Header> headers = new ArrayList<>();
+  private final Map<String, InnerHeader> headers = new LinkedHashMap<>();
+
+  private HttpHeaders(Map<String, InnerHeader> headers) {
+    this.headers.putAll(headers);
+  }
+
+  private static String getKey(String name) {
+    return name.toLowerCase(Locale.ROOT);
+  }
 
   /** Appends a header, preserving order and allowing duplicates. */
   public void add(String name, String value) {
-    headers.add(new Header(name, value));
+    val key = getKey(name);
+    val header = headers.get(key);
+    if (header != null) header.values.add(value);
+    else headers.put(key, new InnerHeader(name, new LinkedHashSet<>(Set.of(value))));
   }
 
   /**
@@ -37,34 +64,32 @@ public final class HttpHeaders {
    * occurrence is replaced and all further occurrences removed; otherwise it is appended. Mirrors
    * {@code hlist_mod(..., 1)}.
    */
-  @SuppressWarnings("java:S127")
   public void modify(String name, String value) {
-    boolean replaced = false;
-    for (int i = 0; i < headers.size(); ++i) {
-      if (headers.get(i).name().equalsIgnoreCase(name)) {
-        if (!replaced) {
-          headers.set(i, new Header(name, value));
-          replaced = true;
-        } else headers.remove(i--);
-      }
-    }
-    if (!replaced) headers.add(new Header(name, value));
+    val key = getKey(name);
+    val header = headers.get(key);
+    if (header != null) {
+      header.values.clear();
+      header.values.add(value);
+    } else headers.put(key, new InnerHeader(name, new LinkedHashSet<>(Set.of(value))));
   }
 
   /** Removes all headers with the given name (case-insensitive). */
   public void remove(String name) {
-    headers.removeIf(h -> h.name().equalsIgnoreCase(name));
+    headers.remove(getKey(name));
   }
 
   /** Returns the value of the first header with the given name, or {@code null}. */
+  @Nullable
   public String getFirst(String name) {
-    for (val h : headers) if (h.name().equalsIgnoreCase(name)) return h.value();
-    return null;
+    return ofNullable(headers.get(getKey(name))).stream()
+        .flatMap(h -> h.values.stream())
+        .findFirst()
+        .orElse(null);
   }
 
   /** Returns true if any header with the given name exists. */
   public boolean contains(String name) {
-    return getFirst(name) != null;
+    return headers.containsKey(getKey(name));
   }
 
   /**
@@ -73,31 +98,37 @@ public final class HttpHeaders {
    */
   public boolean containsToken(String name, String token) {
     val lower = token.toLowerCase(Locale.ROOT);
-    return headers.stream()
-        .anyMatch(
-            h ->
-                h.name().equalsIgnoreCase(name)
-                    && h.value().toLowerCase(Locale.ROOT).contains(lower));
+    return ofNullable(headers.get(getKey(name))).stream()
+        .flatMap(h -> h.values.stream())
+        .anyMatch(v -> v.toLowerCase(Locale.ROOT).contains(lower));
   }
 
-  /** Returns the headers in order (live view; treat as read-only). */
+  /** Returns the copy of headers in order. */
   public List<Header> all() {
-    return headers;
+    return headers.values().stream()
+        .flatMap(h -> h.values.stream().map(v -> new Header(h.name, v)))
+        .toList();
   }
 
   /** Returns a deep copy of these headers. */
   public HttpHeaders copy() {
-    val c = new HttpHeaders();
-    c.headers.addAll(this.headers);
-    return c;
+    val copy =
+        this.headers.entrySet().stream()
+            .map(e -> Map.entry(e.getKey(), e.getValue().copy()))
+            .collect(
+                LinkedHashMap<String, InnerHeader>::new,
+                (m, e) -> m.put(e.getKey(), e.getValue()),
+                Map::putAll);
+    return new HttpHeaders(copy);
   }
 
+  /** Returns true if there are no headers. */
   public boolean isEmpty() {
     return headers.isEmpty();
   }
 
   @Override
   public String toString() {
-    return headers.toString();
+    return all().toString();
   }
 }
