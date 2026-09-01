@@ -1,6 +1,8 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.proxy;
 
+import static org.springframework.util.StringUtils.hasText;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -33,7 +35,7 @@ public class ParentProxyManager {
   public ParentProxyManager(JntlmProperties properties, ConnectionPool connectionPool) {
     this.connectionPool = connectionPool;
     for (val spec : properties.getParents())
-      if (spec != null && !spec.isBlank()) parents.add(ParentProxy.parse(spec));
+      if (hasText(spec)) parents.add(ParentProxy.parse(spec));
 
     if (parents.isEmpty())
       throw new IllegalStateException("No parent proxies configured (jntlm.parents)");
