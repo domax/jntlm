@@ -66,7 +66,11 @@ public class ParentProxyManager {
         }
         return socket;
       } catch (IOException e) {
-        log.warn("Proxy connect to {} failed ({}), will try the next one", p, e.getMessage());
+        log.warn(
+            "Proxy connect to {} failed ({}), will try {}",
+            p,
+            e,
+            parents.size() > 1 ? "the next one" : "again");
       }
     }
     throw new IOException("No proxy on the list works.");
