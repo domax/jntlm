@@ -78,7 +78,7 @@ public class JntlmConfig {
     return creds;
   }
 
-  /** Returns the local hostname (without domain) or "jntlm" if it cannot be determined. */
+  /** Returns the local hostname (without a domain) or "jntlm" if it cannot be determined. */
   private static String defaultWorkstation() {
     val defHost = "jntlm";
     try {
@@ -90,7 +90,7 @@ public class JntlmConfig {
       log.info("Using default workstation: {}", host);
       return host;
     } catch (UnknownHostException ignored) {
-      log.warn("Could not determine workstation. Defaulting to 'jntlm'");
+      log.warn("Could not determine workstation. Defaulting to '{}'", defHost);
       return defHost;
     }
   }

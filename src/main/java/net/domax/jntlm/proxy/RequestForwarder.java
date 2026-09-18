@@ -59,7 +59,7 @@ public class RequestForwarder {
     beginning:
     while (true) {
       Endpoint server;
-      Credentials creds;
+      final Credentials creds;
       boolean wasCached = false;
       boolean authok = false;
       boolean noauth = false;
