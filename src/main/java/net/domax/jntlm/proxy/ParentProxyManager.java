@@ -1,18 +1,16 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.proxy;
 
-import static org.springframework.util.StringUtils.hasText;
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.config.JntlmProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * Manages the ordered list of parent proxies and connects to them with failover.
@@ -27,16 +25,18 @@ public class ParentProxyManager {
 
   private static final int CONNECT_TIMEOUT_MS = 10_000;
 
-  private final List<ParentProxy> parents = new ArrayList<>();
+  private final List<ParentProxy> parents;
   private final ConnectionPool connectionPool;
 
   private final AtomicInteger current = new AtomicInteger();
 
   public ParentProxyManager(JntlmProperties properties, ConnectionPool connectionPool) {
     this.connectionPool = connectionPool;
-    for (val spec : properties.getParents())
-      if (hasText(spec)) parents.add(ParentProxy.parse(spec));
-
+    parents =
+        properties.getParents().stream()
+            .filter(StringUtils::hasText)
+            .map(ParentProxy::parse)
+            .toList();
     if (parents.isEmpty())
       throw new IllegalStateException("No parent proxies configured (jntlm.parents)");
   }
@@ -50,9 +50,7 @@ public class ParentProxyManager {
    * @throws IOException if no parent proxy on the list can be reached
    */
   public Socket connect() throws IOException {
-    final int start;
-    start = current.get();
-
+    val start = current.get();
     for (int i = 0; i < parents.size(); ++i) {
       int idx = (start + i) % parents.size();
       val p = parents.get(idx);
