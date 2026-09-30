@@ -84,21 +84,21 @@ public final class NtlmMessages {
 
     val domain = toOem(creds.getDomain().toUpperCase());
     val host = toOem(creds.getWorkstation().toUpperCase());
-    val dlen = domain.length;
-    val hlen = host.length;
+    val dLen = domain.length;
+    val hLen = host.length;
 
-    val buf = new byte[32 + dlen + hlen];
+    val buf = new byte[32 + dLen + hLen];
     arraycopy("NTLMSSP\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1), 0, buf, 0, 8);
     Le.u32(buf, 8, 1);
     Le.u32(buf, 12, flags);
-    Le.u16(buf, 16, dlen);
-    Le.u16(buf, 18, dlen);
-    Le.u32(buf, 20, 32L + hlen);
-    Le.u16(buf, 24, hlen);
-    Le.u16(buf, 26, hlen);
+    Le.u16(buf, 16, dLen);
+    Le.u16(buf, 18, dLen);
+    Le.u32(buf, 20, 32L + hLen);
+    Le.u16(buf, 24, hLen);
+    Le.u16(buf, 26, hLen);
     Le.u32(buf, 28, 32);
-    arraycopy(host, 0, buf, 32, hlen);
-    arraycopy(domain, 0, buf, 32 + hlen, dlen);
+    arraycopy(host, 0, buf, 32, hLen);
+    arraycopy(domain, 0, buf, 32 + hLen, dLen);
     return buf;
   }
 
@@ -125,27 +125,25 @@ public final class NtlmMessages {
     int chalLen = challenge.length;
 
     // Parse the target-information block (used by NTLMv2).
-    int tbofs = 0;
-    int tblen = 0;
+    int tbOfs = 0;
+    int tbLen = 0;
     int lastType = -1;
     if (chalLen >= NTLM_CHALLENGE_MIN) {
-      int tpos = Le.readU16(challenge, 44);
-      tbofs = tpos;
-      while (tpos + 4 <= chalLen) {
-        int ttype = Le.readU16(challenge, tpos);
-        lastType = ttype;
-        if (ttype == 0) {
-          break;
-        }
-        int tlen = Le.readU16(challenge, tpos + 2);
-        if (tpos + 4 + tlen > chalLen) {
-          break;
-        }
-        tpos += 4 + tlen;
-        tblen += 4 + tlen;
+      int tPos = Le.readU16(challenge, 44);
+      tbOfs = tPos;
+      while (tPos + 4 <= chalLen) {
+        int tType = Le.readU16(challenge, tPos);
+        lastType = tType;
+        if (tType == 0) break;
+
+        int tLen = Le.readU16(challenge, tPos + 2);
+        if (tPos + 4 + tLen > chalLen) break;
+
+        tPos += 4 + tLen;
+        tbLen += 4 + tLen;
       }
-      if (tblen != 0 && lastType == 0) {
-        tblen += 4;
+      if (tbLen != 0 && lastType == 0) {
+        tbLen += 4;
       }
     }
 
@@ -153,7 +151,7 @@ public final class NtlmMessages {
     byte[] lmHash = null;
 
     if (creds.getHashNtlm2() != 0) {
-      val r = ntlm2CalcResp(creds.getPassNtlm2(), challenge, tbofs, tblen);
+      val r = ntlm2CalcResp(creds.getPassNtlm2(), challenge, tbOfs, tbLen);
       ntHash = r[0];
       lmHash = r[1];
     }
@@ -162,83 +160,78 @@ public final class NtlmMessages {
       ntHash = r[0];
       lmHash = r[1];
     }
-    if (creds.getHashNt() == 1) {
+    if (creds.getHashNt() == 1)
       ntHash = ntlmCalcResp(creds.getPassNt(), serverChallenge(challenge));
-    }
-    if (creds.getHashLm() != 0) {
-      lmHash = ntlmCalcResp(creds.getPassLm(), serverChallenge(challenge));
-    }
 
-    int ntlen = ntHash == null ? 0 : ntHash.length;
-    int lmlen = lmHash == null ? 0 : lmHash.length;
+    if (creds.getHashLm() != 0)
+      lmHash = ntlmCalcResp(creds.getPassLm(), serverChallenge(challenge));
+
+    int ntLen = ntHash == null ? 0 : ntHash.length;
+    int lmLen = lmHash == null ? 0 : lmHash.length;
 
     val unicode = creds.getHashNt() != 0 || creds.getHashNtlm2() != 0;
-    final byte[] udomain;
-    final byte[] uuser;
-    final byte[] uhost;
+    final byte[] uDomain;
+    final byte[] uUser;
+    final byte[] uHost;
     if (unicode) {
-      udomain = toUnicode(creds.getDomain().toUpperCase());
-      uuser = toUnicode(creds.getUser());
-      uhost = toUnicode(creds.getWorkstation().toUpperCase());
+      uDomain = toUnicode(creds.getDomain().toUpperCase());
+      uUser = toUnicode(creds.getUser());
+      uHost = toUnicode(creds.getWorkstation().toUpperCase());
     } else {
-      udomain = toOem(creds.getDomain().toUpperCase());
-      uuser = toOem(creds.getUser().toUpperCase());
-      uhost = toOem(creds.getWorkstation().toUpperCase());
+      uDomain = toOem(creds.getDomain().toUpperCase());
+      uUser = toOem(creds.getUser().toUpperCase());
+      uHost = toOem(creds.getWorkstation().toUpperCase());
     }
-    int dlen = udomain.length;
-    int ulen = uuser.length;
-    int hlen = uhost.length;
+    int dLen = uDomain.length;
+    int uLen = uUser.length;
+    int hLen = uHost.length;
 
     val buf = new byte[NTLM_BUFSIZE];
     arraycopy("NTLMSSP\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1), 0, buf, 0, 8);
     Le.u32(buf, 8, 3);
 
     // LM response security buffer
-    Le.u16(buf, 12, lmlen);
-    Le.u16(buf, 14, lmlen);
-    Le.u32(buf, 16, 64L + dlen + ulen + hlen);
+    Le.u16(buf, 12, lmLen);
+    Le.u16(buf, 14, lmLen);
+    Le.u32(buf, 16, 64L + dLen + uLen + hLen);
 
     // NT response security buffer
-    Le.u16(buf, 20, ntlen);
-    Le.u16(buf, 22, ntlen);
-    Le.u32(buf, 24, 64L + dlen + ulen + hlen + lmlen);
+    Le.u16(buf, 20, ntLen);
+    Le.u16(buf, 22, ntLen);
+    Le.u32(buf, 24, 64L + dLen + uLen + hLen + lmLen);
 
     // Domain
-    Le.u16(buf, 28, dlen);
-    Le.u16(buf, 30, dlen);
+    Le.u16(buf, 28, dLen);
+    Le.u16(buf, 30, dLen);
     Le.u32(buf, 32, 64);
 
     // Username
-    Le.u16(buf, 36, ulen);
-    Le.u16(buf, 38, ulen);
-    Le.u32(buf, 40, 64L + dlen);
+    Le.u16(buf, 36, uLen);
+    Le.u16(buf, 38, uLen);
+    Le.u32(buf, 40, 64L + dLen);
 
     // Workstation
-    Le.u16(buf, 44, hlen);
-    Le.u16(buf, 46, hlen);
-    Le.u32(buf, 48, 64L + dlen + ulen);
+    Le.u16(buf, 44, hLen);
+    Le.u16(buf, 46, hLen);
+    Le.u32(buf, 48, 64L + dLen + uLen);
 
     // Session key (empty)
     Le.u16(buf, 52, 0);
     Le.u16(buf, 54, 0);
-    Le.u16(buf, 56, 64 + dlen + ulen + hlen + lmlen + ntlen);
+    Le.u16(buf, 56, 64 + dLen + uLen + hLen + lmLen + ntLen);
 
     // Flags: echo the server's flags from the challenge (bytes 20..24)
     arraycopy(challenge, 20, buf, 60, 4);
 
     int p = 64;
-    arraycopy(udomain, 0, buf, p, dlen);
-    arraycopy(uuser, 0, buf, p + dlen, ulen);
-    arraycopy(uhost, 0, buf, p + dlen + ulen, hlen);
-    if (lmHash != null) {
-      arraycopy(lmHash, 0, buf, p + dlen + ulen + hlen, lmlen);
-    }
-    if (ntHash != null) {
-      // Faithful to CNTLM: NT response is placed 24 bytes after the identity fields.
-      arraycopy(ntHash, 0, buf, p + dlen + ulen + hlen + 24, ntlen);
-    }
+    arraycopy(uDomain, 0, buf, p, dLen);
+    arraycopy(uUser, 0, buf, p + dLen, uLen);
+    arraycopy(uHost, 0, buf, p + dLen + uLen, hLen);
+    if (lmHash != null) arraycopy(lmHash, 0, buf, p + dLen + uLen + hLen, lmLen);
+    // Faithful to CNTLM: NT response is placed 24 bytes after the identity fields.
+    if (ntHash != null) arraycopy(ntHash, 0, buf, p + dLen + uLen + hLen + 24, ntLen);
 
-    int total = 64 + dlen + ulen + hlen + lmlen + ntlen;
+    int total = 64 + dLen + uLen + hLen + lmLen + ntLen;
     return Arrays.copyOf(buf, total);
   }
 
@@ -265,31 +258,31 @@ public final class NtlmMessages {
    * Computes the NTLMv2 response. Returns {@code [ntResponse, lmResponse]}. Ports {@code
    * ntlm2_calc_resp}.
    */
-  private static byte[][] ntlm2CalcResp(byte[] passNtlm2, byte[] challenge, int tbofs, int tblen) {
+  private static byte[][] ntlm2CalcResp(byte[] passNtlm2, byte[] challenge, int tbOfs, int tbLen) {
     val nonce = new byte[8];
     RANDOM.nextBytes(nonce);
     val timestamp = (System.currentTimeMillis() / 1000L + FILETIME_EPOCH_OFFSET) * 10000000L;
 
-    val blen = 28 + tblen + 4;
-    val blob = new byte[blen];
+    val bLen = 28 + tbLen + 4;
+    val blob = new byte[bLen];
     Le.u32(blob, 0, 0x00000101L);
     Le.u32(blob, 4, 0);
     Le.u64(blob, 8, timestamp);
     arraycopy(nonce, 0, blob, 16, 8);
     Le.u32(blob, 24, 0);
-    arraycopy(challenge, tbofs, blob, 28, tblen);
+    arraycopy(challenge, tbOfs, blob, 28, tbLen);
     // last 4 bytes remain zero
 
     val serverChal = serverChallenge(challenge);
 
     // NT response = HMAC-MD5(passNtlm2, serverChallenge || blob) || blob // NOSONAR java:S125
-    val ntProofInput = new byte[8 + blen];
+    val ntProofInput = new byte[8 + bLen];
     arraycopy(serverChal, 0, ntProofInput, 0, 8);
-    arraycopy(blob, 0, ntProofInput, 8, blen);
+    arraycopy(blob, 0, ntProofInput, 8, bLen);
     val ntProof = NtlmCrypto.hmacMd5(passNtlm2, ntProofInput);
-    val ntResp = new byte[16 + blen];
+    val ntResp = new byte[16 + bLen];
     arraycopy(ntProof, 0, ntResp, 0, 16);
-    arraycopy(blob, 0, ntResp, 16, blen);
+    arraycopy(blob, 0, ntResp, 16, bLen);
 
     // LMv2 response = HMAC-MD5(passNtlm2, serverChallenge || nonce) || nonce // NOSONAR java:S125
     val lmInput = new byte[16];

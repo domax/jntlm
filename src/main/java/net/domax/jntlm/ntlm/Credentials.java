@@ -5,6 +5,7 @@ import static java.util.Optional.ofNullable;
 
 import lombok.Data;
 import lombok.ToString.Exclude;
+import lombok.experimental.Accessors;
 import lombok.val;
 
 /**
@@ -25,6 +26,7 @@ import lombok.val;
  * </ul>
  */
 @Data
+@Accessors(chain = true)
 public final class Credentials {
 
   private String user = "";

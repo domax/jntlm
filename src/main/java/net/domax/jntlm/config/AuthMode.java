@@ -34,9 +34,7 @@ public enum AuthMode {
   }
 
   /** Applies this dialect's hash switches onto the given credentials. */
-  public void applyTo(Credentials creds) {
-    creds.setHashNt(hashNt);
-    creds.setHashLm(hashLm);
-    creds.setHashNtlm2(hashNtlm2);
+  public Credentials applyTo(Credentials creds) {
+    return creds.setHashNt(hashNt).setHashLm(hashLm).setHashNtlm2(hashNtlm2);
   }
 }

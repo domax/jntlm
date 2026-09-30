@@ -39,19 +39,13 @@ public class JntlmConfig {
   @Bean
   public Credentials globalCredentials(JntlmProperties properties) {
     val src = properties.getCredentials();
-    val creds = new Credentials();
+    val creds = new Credentials().setUser("").setDomain(ofNullable(src.getDomain()).orElse(""));
 
-    var user = ofNullable(src.getUsername()).orElse("");
-    var domain = ofNullable(src.getDomain()).orElse("");
-
-    // Split "user@domain" - the domain part overrides the Domain setting.
-    int at = user.indexOf('@');
-    if (at > 0) {
-      domain = user.substring(at + 1);
-      user = user.substring(0, at);
-    }
-    creds.setUser(user);
-    creds.setDomain(domain);
+    ofNullable(src.getUsername())
+        // Split "user@domain" - the domain part overrides the Domain setting.
+        .map(u -> u.split("@", 2))
+        .map(p -> p.length == 2 ? p : new String[] {p[0], creds.getDomain()})
+        .ifPresent(p -> creds.setUser(p[0]).setDomain(p[1]));
 
     creds.setWorkstation(
         ofNullable(src.getWorkstation())
@@ -59,20 +53,22 @@ public class JntlmConfig {
             .orElseGet(JntlmConfig::defaultWorkstation));
 
     // Select the dialect (sets hashNt/hashLm/hashNtlm2) and optional manual flags.
-    properties.getAuth().applyTo(creds);
-    creds.setFlags(parseFlags(properties.getFlags()));
+    properties.getAuth().applyTo(creds).setFlags(parseFlags(properties.getFlags()));
 
-    val password = ofNullable(src.getPassword()).orElse("");
-    if (!password.isEmpty()) {
-      // Derive every hash the configured dialect might need from the plaintext password.
-      creds.setPassLm(NtlmHashes.lmHash(password));
-      creds.setPassNt(NtlmHashes.ntHash(password));
-      creds.setPassNtlm2(NtlmHashes.ntlm2Hash(user, domain, password));
-    } else {
-      creds.setPassLm(parseHash(src.getPassLm()).orElse(null));
-      creds.setPassNt(parseHash(src.getPassNt()).orElse(null));
-      creds.setPassNtlm2(parseHash(src.getPassNtlm2()).orElse(null));
-    }
+    ofNullable(src.getPassword())
+        .filter(not(String::isBlank))
+        .ifPresentOrElse(
+            // Derive every hash the configured dialect might need from the plaintext password.
+            p ->
+                creds
+                    .setPassLm(NtlmHashes.lmHash(p))
+                    .setPassNt(NtlmHashes.ntHash(p))
+                    .setPassNtlm2(NtlmHashes.ntlm2Hash(creds.getUser(), creds.getDomain(), p)),
+            () ->
+                creds
+                    .setPassLm(parseHash(src.getPassLm()).orElse(null))
+                    .setPassNt(parseHash(src.getPassNt()).orElse(null))
+                    .setPassNtlm2(parseHash(src.getPassNtlm2()).orElse(null)));
 
     log.debug("Credential success: {}", creds);
     return creds;
