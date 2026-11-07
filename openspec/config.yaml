@@ -1,0 +1,65 @@
+schema: spec-driven
+githubCopilot:
+  cloudAgent: false
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+context: |
+  This project uses a two-phase OpenSpec workflow:
+  1. Planning (propose / update) – produce clear proposal, specs, design, and tasks.
+  2. Implementation (apply) – follow the approved plan strictly and implement the tasks.
+
+  Preferred local models:
+  - Planning: DeepSeek-R1:32b (strong reasoning, structured output)
+  - Implementation: Flint (strong coding / agentic performance)
+
+  General principles:
+  - Prefer clarity, testability, and small verifiable steps.
+  - Requirements should be written as observable behavior (SHALL statements + scenarios).
+  - Implementation must stay within the approved plan – no scope expansion.
+  - Match existing project conventions and style.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+rules:
+  proposal:
+    - Keep the proposal focused on why and what (not low-level how).
+    - Explicitly state assumptions and out-of-scope items.
+    - Identify the main impact areas.
+
+  specs:
+    - Write requirements as clear SHALL statements.
+    - Include concrete Given/When/Then scenarios for every important requirement.
+    - Prefer observable behavior over internal implementation details.
+    - Reference existing patterns when extending behavior.
+
+  design:
+    - Document key technical decisions and trade-offs.
+    - Call out risks and edge cases.
+    - Keep the design aligned with the proposal and specs.
+
+  tasks:
+    - Break work into small, ordered, verifiable tasks.
+    - Each task should be completable in one focused implementation session.
+    - Make tasks concrete enough that an implementation model can execute them without guessing.
+    - Group related tasks logically (e.g. by phase or component).
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from the artifact rules above.
+operations:
+  apply:
+    guidance:
+      - Follow the approved plan (proposal, specs, design, tasks) strictly.
+      - Work through tasks.md in order and mark each task complete only when fully done.
+      - Prefer precise, minimal changes that match existing code style.
+      - Read relevant existing code before editing.
+      - If a task is ambiguous or blocked, stop and ask for clarification instead of inventing requirements.
+      - After significant changes, verify against the scenarios in the specs.
+
+  archive:
+    guidance:
+      - Keep the archive summary concise.
+      - Confirm that delta specs are ready to be merged into the main specs.

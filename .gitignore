@@ -44,5 +44,5 @@ bin/
 
 /cntlm
 application-local.yml
-!/bin/
+/bin/
 /jntlm.pid

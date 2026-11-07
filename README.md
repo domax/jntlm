@@ -82,11 +82,11 @@ proxy**.
   ```shell
   ./gradlew bootRun --args='--spring.profiles.active=local'
   ```
-- **Run the built jar / deploy:** use the `bin/jntlm` control script (see below).
+- **Run the built jar / deploy:** use the `scripts/jntlm` control script (see below).
 
-## Control script (`bin/jntlm`)
+## Control script (`scripts/jntlm`)
 
-A [jntlm](bin/jntlm) script is the recommended POSIX control command for running JNTLM as a
+A [jntlm](scripts/jntlm) script is the recommended POSIX control command for running JNTLM as a
 background service. It resolves its own directory (`APP_HOME`) and expects three files side by side,
 all sharing the script's base name:
 
@@ -171,7 +171,7 @@ logging.level:
   net.domax.jntlm: DEBUG
 ```
 
-(The `bin/jntlm` control script expects this file beside `jntlm.jar`. During development the
+(The `scripts/jntlm` control script expects this file beside `jntlm.jar`. During development the
 separate `local` profile — `application-local.yml`, excluded from the jar — plays the same role via
 `--spring.profiles.active=local`.)
 
