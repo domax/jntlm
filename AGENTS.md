@@ -51,7 +51,9 @@ proxy**.
 ## Gotchas
 
 - NTLM negotiate `flags` sometimes need per-proxy overrides (some proxies reject the default
-  `0xa208b205`); see the annotated `application-local.yml` example (`0x00088205` for BlueCoat).
+  `0xa208b205`). `proxy/NtlmFlagsResolver` probes the parent for working flags on first use and
+  caches them (`jntlm.detect.*`); `jntlm.flags` is tried first and pins a value (e.g. `0x00088205`
+  for BlueCoat, see the annotated `application-local.yml`). Falls back to the dialect default.
 - Credentials: supply either a plaintext `password` (hashes derived at startup in `JntlmConfig`)
   **or** pre-computed hex hashes (`pass-lm`/`pass-nt`/`pass-ntlm2`) — not both.
 

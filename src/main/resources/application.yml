@@ -11,7 +11,7 @@ spring:
   profiles.include: custom
 
 jntlm:
-  version: "1.0.0"
+  version: "1.1.0"
 
   # Local listener. Bind to 127.0.0.1 so only this machine can use the proxy.
   listen-address: 127.0.0.1
@@ -26,10 +26,22 @@ jntlm:
   auth: NTLMV2
 
   # Optional manual NTLM negotiate flags (hex or decimal). Leave 0 to let the
-  # selected 'auth' dialect pick CNTLM-compatible defaults.
+  # selected 'auth' dialect pick CNTLM-compatible defaults. With auto-detection
+  # enabled (below), a non-zero value is simply the first candidate tried.
   # See https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-nlmp/99d90ff4-957f-4c8a-80e4-5bfe5a9a9832
   # for details on the NTLM negotiate flags.
   flags: 0
+
+  # NTLM negotiate-flags auto-detection. jntlm probes the parent proxy with a
+  # short list of candidate flags, caches the first set that completes the full
+  # NTLM handshake, and logs it at INFO (so it can be pinned in 'flags').
+  # Falls back to 'flags' / the dialect default when nothing works.
+  detect:
+    # Set to false if you want to disable probing (pre-detection behavior).
+    enabled: true
+    # Optional URL to probe at startup (http:// -> GET, https:// -> CONNECT).
+    # Leave unset to detect lazily on the first client request.
+    probe-url: ~
 
   # Ordered list of parent proxies, "host:port". Tried top-to-bottom with
   # round-robin failover if one becomes unreachable.

@@ -74,6 +74,11 @@ public class ParentProxyManager {
     throw new IOException("No proxy on the list works.");
   }
 
+  /** Returns the currently active parent proxy. */
+  public ParentProxy activeParent() {
+    return parents.get(current.get());
+  }
+
   /** Updates the active parent and flushes cached connections bound to the previous parent. */
   private void onParentSwitched(int newIndex) {
     connectionPool.invalidateAll();

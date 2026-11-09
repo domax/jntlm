@@ -6,18 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import lombok.val;
 import net.domax.jntlm.config.JntlmConfig;
 import net.domax.jntlm.config.JntlmProperties;
 import net.domax.jntlm.http.HttpMessage;
-import net.domax.jntlm.ntlm.Credentials;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +27,9 @@ import org.junit.jupiter.api.Test;
 class ProxyForwardingIntegrationTest {
 
   private MockParentProxy parent;
+  private JntlmProperties props;
   private RequestForwarder forwarder;
+  private ConnectionPool pool;
   private ServerSocket clientListener;
 
   @BeforeEach
@@ -38,21 +37,28 @@ class ProxyForwardingIntegrationTest {
     parent = new MockParentProxy();
     parent.start();
 
-    JntlmProperties props = new JntlmProperties();
+    props = new JntlmProperties();
     props.setParents(List.of("127.0.0.1:" + parent.port()));
     props.getCredentials().setUsername("testuser");
     props.getCredentials().setDomain("TESTDOMAIN");
     props.getCredentials().setPassword("SecREt01");
     props.getCredentials().setWorkstation("WS");
-
-    Credentials creds = new JntlmConfig().globalCredentials(props);
-    ConnectionPool pool = new ConnectionPool();
-    ParentProxyManager manager = new ParentProxyManager(props, pool);
-    ProxyAuthenticator auth = new ProxyAuthenticator(manager);
-    forwarder = new RequestForwarder(manager, pool, auth, creds);
+    // Forwarding tests below assert exact handshake counts; detection has its own tests.
+    props.getDetect().setEnabled(false);
+    wire();
 
     clientListener = new ServerSocket();
     clientListener.bind(new InetSocketAddress("127.0.0.1", 0));
+  }
+
+  /** (Re)builds the forwarding stack from {@link #props}. */
+  private void wire() {
+    val creds = new JntlmConfig().globalCredentials(props);
+    pool = new ConnectionPool();
+    val manager = new ParentProxyManager(props, pool);
+    val auth = new ProxyAuthenticator(manager);
+    val resolver = new NtlmFlagsResolver(manager, creds, props);
+    forwarder = new RequestForwarder(manager, pool, auth, creds, resolver);
   }
 
   @AfterEach
@@ -63,15 +69,15 @@ class ProxyForwardingIntegrationTest {
 
   @Test
   void completesNtlmHandshakeAndRelaysResponse() throws Exception {
-    Socket testClient = new Socket();
+    val testClient = new Socket();
     testClient.connect(clientListener.getLocalSocketAddress());
-    Socket clientSide = clientListener.accept();
-    Endpoint clientEp = new Endpoint(clientSide);
+    val clientSide = clientListener.accept();
+    val clientEp = new Endpoint(clientSide);
 
-    HttpMessage first = get("http://example.com/page");
-    Thread t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, first));
+    val first = get("http://example.com/page");
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, first));
 
-    MockResponse r = readResponse(testClient.getInputStream());
+    val r = readResponse(testClient.getInputStream());
     assertEquals(200, r.status());
     assertEquals("hello", r.body());
     assertEquals(1, parent.challengesSent(), "exactly one NTLM challenge expected");
@@ -85,18 +91,18 @@ class ProxyForwardingIntegrationTest {
   void reusesAuthenticatedConnectionForSecondRequest() throws Exception {
     // Both requests travel over one client connection; forward()'s keep-alive loop serves the
     // second one on the already-authenticated parent connection (no fresh connect, no re-auth).
-    Socket testClient = new Socket();
+    val testClient = new Socket();
     testClient.connect(clientListener.getLocalSocketAddress());
-    Socket clientSide = clientListener.accept();
-    Endpoint clientEp = new Endpoint(clientSide);
+    val clientSide = clientListener.accept();
+    val clientEp = new Endpoint(clientSide);
 
-    HttpMessage first = get("http://example.com/a");
-    Thread t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, first));
+    val first = get("http://example.com/a");
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, first));
 
-    InputStream in = testClient.getInputStream();
-    OutputStream out = testClient.getOutputStream();
+    val in = testClient.getInputStream();
+    val out = testClient.getOutputStream();
 
-    MockResponse r1 = readResponse(in);
+    val r1 = readResponse(in);
 
     // Second request sent as raw HTTP over the same client socket.
     out.write(
@@ -105,7 +111,7 @@ class ProxyForwardingIntegrationTest {
                 + "Proxy-Connection: keep-alive\r\n\r\n")
             .getBytes(StandardCharsets.ISO_8859_1));
     out.flush();
-    MockResponse r2 = readResponse(in);
+    val r2 = readResponse(in);
 
     assertEquals(200, r1.status());
     assertEquals(200, r2.status());
@@ -122,22 +128,22 @@ class ProxyForwardingIntegrationTest {
   @SuppressWarnings("StatementWithEmptyBody")
   @Test
   void tunnelsConnectRequests() throws Exception {
-    Socket testClient = new Socket();
+    val testClient = new Socket();
     testClient.connect(clientListener.getLocalSocketAddress());
-    Socket clientSide = clientListener.accept();
-    Endpoint clientEp = new Endpoint(clientSide);
+    val clientSide = clientListener.accept();
+    val clientEp = new Endpoint(clientSide);
 
-    HttpMessage connect = HttpMessage.newRequest("CONNECT", "example.com:443", "HTTP/1.1");
+    val connect = HttpMessage.newRequest("CONNECT", "example.com:443", "HTTP/1.1");
     connect.setHost("example.com");
     connect.setPort(443);
     connect.getHeaders().add("Host", "example.com:443");
 
-    Thread t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, connect));
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, connect));
 
-    InputStream in = testClient.getInputStream();
-    OutputStream out = testClient.getOutputStream();
+    val in = testClient.getInputStream();
+    val out = testClient.getOutputStream();
 
-    String statusLine = readLine(in);
+    val statusLine = readLine(in);
     assertTrue(statusLine.contains("200"), "CONNECT should establish the tunnel: " + statusLine);
     // consume remaining response headers
     while (!readLine(in).isEmpty()) {
@@ -148,18 +154,86 @@ class ProxyForwardingIntegrationTest {
     // parent and the parent's response reached the client (a self-echoing tunnel would fail).
     out.write("ping".getBytes(StandardCharsets.ISO_8859_1));
     out.flush();
-    byte[] buf = new byte[4];
-    int n = in.read(buf);
+    val buf = new byte[4];
+    val n = in.read(buf);
     assertEquals("PING", new String(buf, 0, n, StandardCharsets.ISO_8859_1));
 
     testClient.close();
     t.join(2000);
   }
 
+  @Test
+  void detectsFlagsOnFirstRequestAndReusesThem() throws Exception {
+    parent.rejectType1(0xa208b205L, 0x0008b205L);
+    props.getDetect().setEnabled(true);
+    wire();
+
+    assertEquals(200, roundTrip(get("http://example.com/one")).status());
+    // Two rejected probes, one accepted probe, then the real handshake with the detected flags.
+    assertEquals(List.of(0xa208b205L, 0x0008b205L, 0x00088205L, 0x00088205L), parent.type1Flags());
+
+    pool.invalidateAll(); // force a fresh parent connection for the next request
+    val r = roundTrip(get("http://example.com/two"));
+    assertEquals(200, r.status());
+    assertEquals("hello", r.body());
+    assertEquals(5, parent.type1Flags().size(), "no new probes expected");
+    assertEquals(0x00088205L, parent.type1Flags().getLast());
+  }
+
+  @Test
+  void postBodyForwardedOnceAfterLazyGetProbe() throws Exception {
+    props.getDetect().setEnabled(true);
+    wire();
+
+    val body = "hello-body";
+    val post = HttpMessage.newRequest("POST", "http://example.com/api", "HTTP/1.1");
+    post.setHost("example.com");
+    post.setPort(80);
+    post.getHeaders().add("Host", "example.com");
+    post.getHeaders().add("Proxy-Connection", "keep-alive");
+    post.getHeaders().add("Content-Length", String.valueOf(body.length()));
+
+    val testClient = new Socket();
+    testClient.connect(clientListener.getLocalSocketAddress());
+    val clientEp = new Endpoint(clientListener.accept());
+    testClient.getOutputStream().write(body.getBytes(StandardCharsets.ISO_8859_1));
+    testClient.getOutputStream().flush();
+
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, post));
+    val r = readResponse(testClient.getInputStream());
+    assertEquals(200, r.status());
+
+    val received = parent.received();
+    assertEquals("GET", received.getFirst().method(), "detection must probe with GET");
+    assertEquals("http://example.com/api", received.getFirst().url());
+    assertEquals(
+        List.of(body),
+        received.stream()
+            .filter(x -> "POST".equals(x.method()) && !x.body().isEmpty())
+            .map(MockParentProxy.Received::body)
+            .toList(),
+        "the POST body must reach the parent exactly once");
+
+    testClient.close();
+    t.join(2000);
+  }
+
+  /** Sends {@code request} over a new client connection and returns the parent's response. */
+  private MockResponse roundTrip(HttpMessage request) throws Exception {
+    val testClient = new Socket();
+    testClient.connect(clientListener.getLocalSocketAddress());
+    val clientEp = new Endpoint(clientListener.accept());
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, request));
+    val r = readResponse(testClient.getInputStream());
+    testClient.close();
+    t.join(2000);
+    return r;
+  }
+
   // --- helpers ---
 
   private static HttpMessage get(String url) {
-    HttpMessage req = HttpMessage.newRequest("GET", url, "HTTP/1.1");
+    val req = HttpMessage.newRequest("GET", url, "HTTP/1.1");
     req.setHost("example.com");
     req.getHeaders().add("Host", "example.com");
     req.getHeaders().add("Proxy-Connection", "keep-alive");
@@ -167,7 +241,7 @@ class ProxyForwardingIntegrationTest {
   }
 
   private static String readLine(InputStream in) throws IOException {
-    StringBuilder sb = new StringBuilder();
+    val sb = new StringBuilder();
     int c;
     while ((c = in.read()) != -1) {
       if (c == '\n') {
@@ -181,9 +255,9 @@ class ProxyForwardingIntegrationTest {
   }
 
   private static MockResponse readResponse(InputStream in) throws IOException {
-    String statusLine = readLine(in);
-    int status = Integer.parseInt(statusLine.split(" ")[1]);
-    int contentLength = 0;
+    val statusLine = readLine(in);
+    val status = Integer.parseInt(statusLine.split(" ")[1]);
+    var contentLength = 0;
     String line;
     while (!(line = readLine(in)).isEmpty()) {
       int colon = line.indexOf(':');
@@ -191,201 +265,9 @@ class ProxyForwardingIntegrationTest {
         contentLength = Integer.parseInt(line.substring(colon + 1).trim());
       }
     }
-    byte[] body = in.readNBytes(contentLength);
+    val body = in.readNBytes(contentLength);
     return new MockResponse(status, new String(body, StandardCharsets.ISO_8859_1));
   }
 
   private record MockResponse(int status, String body) {}
-
-  /** Minimal parent proxy that demands NTLM once per connection then serves 200s. */
-  private static final class MockParentProxy {
-    private ServerSocket serverSocket;
-    private volatile boolean running;
-    private final AtomicInteger challenges = new AtomicInteger();
-    private final AtomicInteger connections = new AtomicInteger();
-
-    void start() throws IOException {
-      serverSocket = new ServerSocket();
-      serverSocket.bind(new InetSocketAddress("127.0.0.1", 0));
-      running = true;
-      Thread.ofVirtual().start(this::acceptLoop);
-    }
-
-    int port() {
-      return serverSocket.getLocalPort();
-    }
-
-    int challengesSent() {
-      return challenges.get();
-    }
-
-    int connectionsAccepted() {
-      return connections.get();
-    }
-
-    void stop() {
-      running = false;
-      try {
-        serverSocket.close();
-      } catch (IOException ignored) {
-        // ignore
-      }
-    }
-
-    private void acceptLoop() {
-      while (running) {
-        try {
-          Socket socket = serverSocket.accept();
-          connections.incrementAndGet();
-          Thread.ofVirtual().start(() -> handle(socket));
-        } catch (IOException e) {
-          return;
-        }
-      }
-    }
-
-    private void handle(Socket socket) {
-      try (socket) {
-        InputStream in = socket.getInputStream();
-        OutputStream out = socket.getOutputStream();
-        boolean challenged = false;
-        while (true) {
-          Request req = readRequest(in);
-          if (req == null) {
-            return;
-          }
-          if (!challenged) {
-            challenged = true;
-            challenges.incrementAndGet();
-            sendChallenge(out);
-          } else if ("CONNECT".equals(req.method)) {
-            sendConnectEstablished(out);
-            echo(in, out);
-            return;
-          } else {
-            sendOk(out);
-          }
-        }
-      } catch (IOException ignored) {
-        // connection ended
-      }
-    }
-
-    private static Request readRequest(InputStream in) throws IOException {
-      String requestLine = readLineRaw(in);
-      if (requestLine == null || requestLine.isEmpty()) {
-        return null;
-      }
-      String[] parts = requestLine.split(" ");
-      String method = parts[0];
-      int contentLength = 0;
-      String line;
-      while ((line = readLineRaw(in)) != null && !line.isEmpty()) {
-        int colon = line.indexOf(':');
-        if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("Content-Length")) {
-          contentLength = Integer.parseInt(line.substring(colon + 1).trim());
-        }
-      }
-      if (contentLength > 0) {
-        in.readNBytes(contentLength);
-      }
-      return new Request(method);
-    }
-
-    private static String readLineRaw(InputStream in) throws IOException {
-      StringBuilder sb = new StringBuilder();
-      int c;
-      boolean any = false;
-      while ((c = in.read()) != -1) {
-        any = true;
-        if (c == '\n') {
-          break;
-        }
-        if (c != '\r') {
-          sb.append((char) c);
-        }
-      }
-      if (!any && sb.isEmpty()) {
-        return null;
-      }
-      return sb.toString();
-    }
-
-    private static void sendChallenge(OutputStream out) throws IOException {
-      byte[] challenge = new byte[52];
-      System.arraycopy("NTLMSSP\0".getBytes(StandardCharsets.ISO_8859_1), 0, challenge, 0, 8);
-      putU32(challenge, 8, 2);
-      putU32(challenge, 20, 0x00000200);
-      for (int i = 0; i < 8; i++) {
-        challenge[24 + i] = (byte) (0x11 * (i + 1));
-      }
-      putU16(challenge, 44, 48);
-      putU16(challenge, 48, 0);
-      putU16(challenge, 50, 0);
-      String b64 = Base64.getEncoder().encodeToString(challenge);
-      String resp =
-          "HTTP/1.1 407 Proxy Authentication Required\r\n"
-              + "Proxy-Authenticate: NTLM "
-              + b64
-              + "\r\n"
-              + "Proxy-Connection: keep-alive\r\n"
-              + "Connection: keep-alive\r\n"
-              + "Content-Length: 0\r\n\r\n";
-      out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
-      out.flush();
-    }
-
-    private static void sendOk(OutputStream out) throws IOException {
-      String body = "hello";
-      String resp =
-          "HTTP/1.1 200 OK\r\n"
-              + "Content-Type: text/plain\r\n"
-              + "Content-Length: "
-              + body.length()
-              + "\r\n"
-              + "Proxy-Connection: keep-alive\r\n"
-              + "Connection: keep-alive\r\n\r\n"
-              + body;
-      out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
-      out.flush();
-    }
-
-    @SuppressWarnings("java:S6126")
-    private static void sendConnectEstablished(OutputStream out) throws IOException {
-      String resp = "HTTP/1.1 200 Connection established\r\nProxy-Connection: keep-alive\r\n\r\n";
-      out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
-      out.flush();
-    }
-
-    /**
-     * Relays tunnelled bytes back to the caller, upper-casing each byte. The transform lets the
-     * integration test distinguish a genuine client&harr;parent relay from a proxy that merely
-     * echoes the client's own bytes back to it (which a mis-wired tunnel would do).
-     */
-    private static void echo(InputStream in, OutputStream out) throws IOException {
-      byte[] buf = new byte[1024];
-      int n;
-      while ((n = in.read(buf)) != -1) {
-        for (int i = 0; i < n; i++) {
-          buf[i] = (byte) Character.toUpperCase(buf[i] & 0xff);
-        }
-        out.write(buf, 0, n);
-        out.flush();
-      }
-    }
-
-    private record Request(String method) {}
-
-    private static void putU16(byte[] buf, int off, int val) {
-      buf[off] = (byte) (val & 0xff);
-      buf[off + 1] = (byte) ((val >>> 8) & 0xff);
-    }
-
-    private static void putU32(byte[] buf, int off, long val) {
-      buf[off] = (byte) (val & 0xff);
-      buf[off + 1] = (byte) ((val >>> 8) & 0xff);
-      buf[off + 2] = (byte) ((val >>> 16) & 0xff);
-      buf[off + 3] = (byte) ((val >>> 24) & 0xff);
-    }
-  }
 }

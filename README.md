@@ -59,8 +59,10 @@ proxy**.
     - `ProxyAuthenticator` runs the NTLM 407 handshake;
     - `ConnectionPool` caches already-authenticated parent connections (NTLM auth is bound to a TCP
       connection, so reuse skips re-auth);
-    - `ParentProxyManager` does round-robin failover over `jntlm.parents`.
-* `ntlm/` — pure NTLM crypto/message building (`NtlmMessages`, `NtlmHashes`, `NtlmCrypto`, `Md4`).
+    - `ParentProxyManager` does round-robin failover over `jntlm.parents`;
+    - `NtlmFlagsResolver` detects and caches working NTLM negotiate flags for the active parent.
+* `ntlm/` — pure NTLM crypto/message building (`NtlmMessages`, `NtlmFlags`, `NtlmHashes`,
+  `NtlmCrypto`, `Md4`).
   All multibyte fields are **little-endian** (`Le`). `Credentials` holds dialect switches + hashes.
 * `http/` — hand-rolled HTTP wire I/O (`HttpIo`, `HttpMessage`, `HttpHeaders`); no servlet stack.
 * `config/`:
@@ -142,17 +144,40 @@ stopping the process:
 
 Configured via `jntlm.*` properties (see `application.yml` for the annotated defaults):
 
-| Property               | Purpose                                                          |
-|------------------------|------------------------------------------------------------------|
-| `jntlm.listen-address` | Local bind address (default `127.0.0.1`, loopback only).         |
-| `jntlm.listen-port`    | Local listener port (default `3128`).                            |
-| `jntlm.auth`           | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`. |
-| `jntlm.flags`          | Optional manual NTLM negotiate flags (hex/decimal; `0` = auto).  |
-| `jntlm.parents`        | Ordered `host:port` parent proxies with round-robin failover.    |
-| `jntlm.credentials.*`  | `username`, `domain`, `workstation`, and password/hashes.        |
+| Property                   | Purpose                                                                     |
+|----------------------------|-----------------------------------------------------------------------------|
+| `jntlm.listen-address`     | Local bind address (default `127.0.0.1`, loopback only).                    |
+| `jntlm.listen-port`        | Local listener port (default `3128`).                                       |
+| `jntlm.auth`               | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.            |
+| `jntlm.flags`              | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
+| `jntlm.detect.enabled`     | Auto-detect working negotiate flags (default `true`; see below).            |
+| `jntlm.detect.probe-url`   | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).       |
+| `jntlm.parents`            | Ordered `host:port` parent proxies with round-robin failover.               |
+| `jntlm.credentials.*`      | `username`, `domain`, `workstation`, and password/hashes.                   |
 
 Credentials: supply **either** a plaintext `password` (hashes derived at startup in `JntlmConfig`)
 **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
+
+### Flag auto-detection
+
+Many parent proxies reject the default NTLM negotiate flags for a dialect (e.g. `0xa208b205` for
+NTLMv2). By default, jntlm finds a working set itself:
+
+- It probes the parent with up to 8 candidates: `jntlm.flags` (if set), the dialect default, then
+  progressively reduced variants (e.g. `0x00088205`), plus a variant derived from the flags the
+  parent advertises in its challenge. A candidate wins only if the full NTLM handshake succeeds.
+- Detection runs once — at startup if `jntlm.detect.probe-url` is set, otherwise on the first client
+  request (as a body-less `GET`, or `CONNECT` for tunnels). Concurrent requests wait for it.
+- The result is cached and logged at INFO (`Detected NTLM flags 0x... for parent ...`), so you can
+  pin it in `jntlm.flags`. It is re-detected after a parent failover, or when the cached flags are
+  rejected (at most once per 60s).
+- If nothing works, jntlm falls back to the dialect default.
+
+> Notes: detection opens a few extra short-lived connections to the parent, and a lazy probe sends
+> one extra `GET` to the first requested URL. With a wrong password every candidate fails at the
+> final handshake step, which some proxies count toward account lockout. Set
+> `jntlm.detect.enabled: false` to restore the static behavior (`jntlm.flags` or the dialect
+> default, no probing).
 
 ### User overrides via the `custom` profile
 
@@ -191,7 +216,9 @@ separate `local` profile — `application-local.yml`, excluded from the jar — 
 ## Gotchas
 
 - NTLM negotiate `flags` sometimes need per-proxy overrides (some proxies reject the default
-  `0xa208b205`); see the annotated `application-local.yml` example (`0x00088205` for BlueCoat).
+  `0xa208b205`). `NtlmFlagsResolver` auto-detects a working set on first use (see "Flag
+  auto-detection"); `jntlm.flags` pins one (e.g. `0x00088205` for BlueCoat, see the annotated
+  `application-local.yml`).
 - Credentials: supply either a plaintext `password` (hashes derived at startup in `JntlmConfig`)
   **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
 

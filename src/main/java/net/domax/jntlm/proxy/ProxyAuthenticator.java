@@ -131,7 +131,7 @@ public class ProxyAuthenticator {
   }
 
   /** Decodes the base64 NTLM Type-2 challenge from a {@code Proxy-Authenticate} header value. */
-  private static byte[] decodeChallenge(String header) {
+  static byte[] decodeChallenge(String header) {
     val h = header.trim();
     if (h.length() < 5) return NO_CHALLENGE;
 

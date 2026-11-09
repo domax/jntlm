@@ -42,6 +42,7 @@ public class RequestForwarder {
   private final ConnectionPool connectionPool;
   private final ProxyAuthenticator authenticator;
   private final Credentials globalCredentials;
+  private final NtlmFlagsResolver flagsResolver;
 
   /**
    * Forwards {@code initialRequest} (already read from {@code client}) and relays the response.
@@ -72,6 +73,8 @@ public class RequestForwarder {
         wasCached = true;
       } else {
         creds = globalCredentials.copy();
+        // Not in CNTLM: negotiate flags come from the (auto-detecting) resolver.
+        creds.setFlags(flagsResolver.flagsFor(request));
         try {
           server = new Endpoint(parentProxyManager.connect());
         } catch (IOException e) {
@@ -187,6 +190,10 @@ public class RequestForwarder {
 
           // --- loop 1: mark the connection authenticated ---
           if (loop == 1 && !noauth && data1.getCode() != 407) authok = true;
+
+          // Not in CNTLM: a fresh handshake was rejected - let the resolver re-detect flags.
+          if (loop == 1 && data1.getCode() == 407 && !wasCached && !noauth && !authok)
+            flagsResolver.reportRejected(creds.getFlags());
 
           // --- loop 1: normalize hop-by-hop headers for the client ---
           if (loop == 1) {
