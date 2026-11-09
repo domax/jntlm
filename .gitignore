@@ -46,3 +46,5 @@ bin/
 application-local.yml
 /bin/
 /jntlm.pid
+/node_modules/
+/package*.json

@@ -11,10 +11,6 @@ context: |
   1. Planning (propose / update) – produce clear proposal, specs, design, and tasks.
   2. Implementation (apply) – follow the approved plan strictly and implement the tasks.
 
-  Preferred local models:
-  - Planning: DeepSeek-R1:32b (strong reasoning, structured output)
-  - Implementation: Flint (strong coding / agentic performance)
-
   General principles:
   - Prefer clarity, testability, and small verifiable steps.
   - Requirements should be written as observable behavior (SHALL statements + scenarios).
