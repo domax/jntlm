@@ -144,16 +144,16 @@ stopping the process:
 
 Configured via `jntlm.*` properties (see `application.yml` for the annotated defaults):
 
-| Property                   | Purpose                                                                     |
-|----------------------------|-----------------------------------------------------------------------------|
-| `jntlm.listen-address`     | Local bind address (default `127.0.0.1`, loopback only).                    |
-| `jntlm.listen-port`        | Local listener port (default `3128`).                                       |
-| `jntlm.auth`               | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.            |
-| `jntlm.flags`              | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
-| `jntlm.detect.enabled`     | Auto-detect working negotiate flags (default `true`; see below).            |
-| `jntlm.detect.probe-url`   | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).       |
-| `jntlm.parents`            | Ordered `host:port` parent proxies with round-robin failover.               |
-| `jntlm.credentials.*`      | `username`, `domain`, `workstation`, and password/hashes.                   |
+| Property                 | Purpose                                                                                             |
+|--------------------------|-----------------------------------------------------------------------------------------------------|
+| `jntlm.listen-address`   | Local bind address (default `127.0.0.1`, loopback only).                                            |
+| `jntlm.listen-port`      | Local listener port (default `3128`).                                                               |
+| `jntlm.auth`             | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.                                    |
+| `jntlm.flags`            | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
+| `jntlm.detect.enabled`   | Auto-detect working negotiate flags (default `true`; see below).                                    |
+| `jntlm.detect.probe-url` | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).                               |
+| `jntlm.parents`          | Ordered `host:port` parent proxies with round-robin failover.                                       |
+| `jntlm.credentials.*`    | `username`, `domain`, `workstation`, and password/hashes.                                           |
 
 Credentials: supply **either** a plaintext `password` (hashes derived at startup in `JntlmConfig`)
 **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
