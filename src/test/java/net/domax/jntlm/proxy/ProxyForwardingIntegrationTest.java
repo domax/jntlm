@@ -218,6 +218,13 @@ class ProxyForwardingIntegrationTest {
     t.join(2000);
   }
 
+  @Test
+  void retriesGetWhenPooledParentClosedBeforeReuse() throws Exception {
+    parent.closeAfterResponse(true);
+    assertEquals(200, roundTrip(get("http://example.com/first")).status());
+    assertEquals(200, roundTrip(get("http://example.com/second")).status());
+  }
+
   /** Sends {@code request} over a new client connection and returns the parent's response. */
   private MockResponse roundTrip(HttpMessage request) throws Exception {
     val testClient = new Socket();

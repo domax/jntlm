@@ -2,6 +2,7 @@
 package net.domax.jntlm.ntlm;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -14,9 +15,38 @@ import lombok.val;
  * key-parity expansion ({@code ntlm_set_key}), single-block DES-ECB encryption, MD5, HMAC-MD5 and
  * MD4 (via {@link Md4}). NT/LM responses use DES, NTLMv2 uses HMAC-MD5.
  */
-final class NtlmCrypto {
+public final class NtlmCrypto {
 
   private NtlmCrypto() {}
+
+  private static final ThreadLocal<Cipher> DES =
+      ThreadLocal.withInitial(
+          () -> {
+            try {
+              return Cipher.getInstance("DES/ECB/NoPadding"); // NOSONAR java:S5542
+            } catch (Exception e) {
+              throw new IllegalStateException("DES unavailable", e);
+            }
+          });
+
+  private static final ThreadLocal<MessageDigest> MD5 =
+      ThreadLocal.withInitial(
+          () -> {
+            try {
+              return MessageDigest.getInstance("MD5"); // NOSONAR java:S4790
+            } catch (Exception e) {
+              throw new IllegalStateException("MD5 unavailable", e);
+            }
+          });
+  private static final ThreadLocal<Mac> HMAC_MD5 =
+      ThreadLocal.withInitial(
+          () -> {
+            try {
+              return Mac.getInstance("HmacMD5"); // NOSONAR java:S4790
+            } catch (Exception e) {
+              throw new IllegalStateException("HmacMD5 unavailable", e);
+            }
+          });
 
   /**
    * Expands a 7-byte block into an 8-byte DES key by inserting a bit after every 7 bits. Mirrors
@@ -56,11 +86,10 @@ final class NtlmCrypto {
    * @param block the 8-byte plaintext block (typically the NTLM challenge)
    * @return the 8-byte ciphertext
    */
-  @SuppressWarnings({"java:S5547", "java:S5542"})
   static byte[] desEncryptBlock(byte[] keys, int keyOffset, byte[] block) {
     try {
       val keySpec = new SecretKeySpec(expandDesKey(keys, keyOffset), "DES");
-      val cipher = Cipher.getInstance("DES/ECB/NoPadding");
+      val cipher = DES.get();
       cipher.init(Cipher.ENCRYPT_MODE, keySpec);
       return cipher.doFinal(block, 0, 8);
     } catch (Exception e) {
@@ -72,19 +101,17 @@ final class NtlmCrypto {
     return Md4.digest(input);
   }
 
-  @SuppressWarnings("java:S4790")
   static byte[] md5(byte[] input) {
     try {
-      return java.security.MessageDigest.getInstance("MD5").digest(input);
+      return MD5.get().digest(input);
     } catch (Exception e) {
       throw new IllegalStateException("MD5 unavailable", e);
     }
   }
 
-  @SuppressWarnings("java:S4790")
   static byte[] hmacMd5(byte[] key, byte[] data) {
     try {
-      Mac mac = Mac.getInstance("HmacMD5");
+      Mac mac = HMAC_MD5.get();
       mac.init(new SecretKeySpec(key, "HmacMD5"));
       return mac.doFinal(data);
     } catch (Exception e) {
@@ -100,5 +127,12 @@ final class NtlmCrypto {
   /** Encodes a string as OEM (US-ASCII/Latin-1) bytes, used by NTLM/LM non-Unicode fields. */
   static byte[] toOem(String s) {
     return s.getBytes(StandardCharsets.ISO_8859_1);
+  }
+
+  /** Cleans up the thread-local crypto state. */
+  public static void cleanup() {
+    DES.remove();
+    MD5.remove();
+    HMAC_MD5.remove();
   }
 }

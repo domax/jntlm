@@ -3,6 +3,7 @@ package net.domax.jntlm.proxy;
 
 import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.LongAdder;
 import net.domax.jntlm.ntlm.Credentials;
 import org.springframework.stereotype.Component;
 
@@ -21,10 +22,27 @@ public class ConnectionPool {
   public record PooledConnection(Endpoint endpoint, Credentials credentials) {}
 
   private final Deque<PooledConnection> pool = new ConcurrentLinkedDeque<>();
+  private final LongAdder hits = new LongAdder();
+  private final LongAdder freshConnections = new LongAdder();
 
   /** Removes and returns a cached connection, or {@code null} if the pool is empty. */
   public PooledConnection pop() {
-    return pool.pollFirst();
+    var connection = pool.pollFirst();
+    if (connection != null) hits.increment();
+    return connection;
+  }
+
+  /** Records a newly opened parent connection. */
+  void recordFreshConnection() {
+    freshConnections.increment();
+  }
+
+  long poolHits() {
+    return hits.sum();
+  }
+
+  long freshConnections() {
+    return freshConnections.sum();
   }
 
   /** Adds an authenticated connection to the pool for later reuse. */

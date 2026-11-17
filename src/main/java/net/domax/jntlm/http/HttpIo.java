@@ -24,6 +24,7 @@ import lombok.val;
 public final class HttpIo {
 
   private static final int BUFSIZE = 8192;
+  private static final int MAX_LINE_LENGTH = 64 * 1024;
   private static final String EOL = "\r\n";
 
   private static final String TRANSFER_ENCODING = "Transfer-Encoding";
@@ -106,8 +107,7 @@ public final class HttpIo {
   public static void sendHeaders(OutputStream out, HttpMessage msg) throws IOException {
     val sb = new StringBuilder();
     sb.append(msg.startLine()).append(EOL);
-    for (val h : msg.getHeaders().all())
-      sb.append(h.name()).append(": ").append(h.value()).append(EOL);
+    msg.getHeaders().appendTo(sb);
     sb.append(EOL);
     out.write(sb.toString().getBytes(StandardCharsets.ISO_8859_1));
     out.flush();
@@ -169,6 +169,7 @@ public final class HttpIo {
     if (current.getHeaders().containsToken(TRANSFER_ENCODING, TOKEN_CHUNKED))
       chunkedTransfer(out, in);
     else dataTransfer(out, in, bodyLen);
+    out.flush();
   }
 
   /** Reads and discards the body of a response. Ports {@code http_body_drop}. */
@@ -197,7 +198,6 @@ public final class HttpIo {
       if (out != null && r > 0) out.write(buf, 0, r);
       if (length >= 0) remaining -= r;
     }
-    if (out != null) out.flush();
   }
 
   /**
@@ -304,6 +304,7 @@ public final class HttpIo {
       any = true;
       baos.write(c);
       if (c == '\n') break;
+      if (baos.size() > MAX_LINE_LENGTH) throw new IOException("HTTP header line too long");
     }
     if (!any) return null;
     return baos.toString(StandardCharsets.ISO_8859_1);

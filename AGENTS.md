@@ -17,8 +17,11 @@ proxy**.
   keep the labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
   `ProxyAuthenticator` runs the NTLM 407 handshake; `ConnectionPool` caches already-authenticated
   parent connections (NTLM auth is bound to a TCP connection, so reuse skips re-auth);
-  `ParentProxyManager` does round-robin failover over `jntlm.parents`.
-- `ntlm/` — pure NTLM crypto/message building (`NtlmMessages`, `NtlmHashes`, `NtlmCrypto`, `Md4`).
+  `ParentProxyManager` does round-robin failover over `jntlm.parents`; `NtlmFlagsResolver`
+  resolves per-parent negotiate flags (eager probe via `jntlm.detect.probe-url` at startup or lazy
+  on first request, then cache/re-detect on rejection cooldown).
+- `ntlm/` — pure NTLM crypto/message building (`NtlmMessages`, `NtlmFlags`, `NtlmHashes`,
+  `NtlmCrypto`, `Md4`).
   All multibyte fields are **little-endian** (`Le`). `Credentials` holds dialect switches + hashes.
 - `http/` — hand-rolled HTTP wire I/O (`HttpIo`, `HttpMessage`, `HttpHeaders`); no servlet stack.
 - `config/` — `JntlmProperties` (`@ConfigurationProperties(prefix="jntlm")`) + `JntlmConfig`
@@ -44,16 +47,24 @@ proxy**.
   header).
 - Test: `./gradlew test` (JUnit 5 + Mockito, JaCoCo report at `build/reports/jacoco/test/html`). See
   `ProxyForwardingIntegrationTest` for the pattern: an in-JVM `MockParentProxy` speaking the NTLM
-  407 handshake; wire real components manually (`new RequestForwarder(manager, pool, auth, creds)`).
+  407 handshake; wire real components manually
+  (`new RequestForwarder(manager, pool, auth, creds, resolver)`).
+- Performance smoke benchmark: `./gradlew test --tests '*ProxyPerformanceBenchmarkTest'` to compare
+  forwarding/auth regressions on the same JDK + machine.
 - Run locally: activate the `local` profile — `application-local.yml` (excluded from the boot jar)
   overrides `parents`, `flags`, and log levels for a real corporate proxy.
+- Deploy/run built jar: packaged defaults always include the `custom` profile
+  (`spring.profiles.include: custom`), so place `application-custom.yml` beside `jntlm.jar`; use
+  `scripts/jntlm` (`start|stop|restart|status|log`) as the operational entrypoint.
 
 ## Gotchas
 
 - NTLM negotiate `flags` sometimes need per-proxy overrides (some proxies reject the default
-  `0xa208b205`). `proxy/NtlmFlagsResolver` probes the parent for working flags on first use and
-  caches them (`jntlm.detect.*`); `jntlm.flags` is tried first and pins a value (e.g. `0x00088205`
-  for BlueCoat, see the annotated `application-local.yml`). Falls back to the dialect default.
+  `0xa208b205`). `proxy/NtlmFlagsResolver` can probe at startup (`jntlm.detect.probe-url`) or first
+  use and caches the result (`jntlm.detect.*`); with detection enabled, `jntlm.flags` is the first
+  candidate (not a hard pin), with one re-detect attempt per 60s on rejection. For static pinning,
+  disable detection and set `jntlm.flags` (e.g. `0x00088205` for BlueCoat, see
+  `application-local.yml`). Falls back to the dialect default.
 - Credentials: supply either a plaintext `password` (hashes derived at startup in `JntlmConfig`)
   **or** pre-computed hex hashes (`pass-lm`/`pass-nt`/`pass-ntlm2`) — not both.
 

@@ -8,6 +8,7 @@ import static net.domax.jntlm.ntlm.NtlmCrypto.toUnicode;
 
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.Locale;
 import lombok.val;
 
 /**
@@ -29,6 +30,8 @@ public final class NtlmMessages {
   private static final long FILETIME_EPOCH_OFFSET = 11644473600L;
 
   private static final SecureRandom RANDOM = new SecureRandom();
+  private static final byte[] SIGNATURE =
+      "NTLMSSP\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
 
   private NtlmMessages() {}
 
@@ -40,13 +43,13 @@ public final class NtlmMessages {
   public static byte[] type1Request(Credentials creds) {
     val flags = getFlags(creds);
 
-    val domain = toOem(creds.getDomain().toUpperCase());
-    val host = toOem(creds.getWorkstation().toUpperCase());
+    val domain = toOem(creds.getDomain().toUpperCase(Locale.ROOT));
+    val host = toOem(creds.getWorkstation().toUpperCase(Locale.ROOT));
     val dLen = domain.length;
     val hLen = host.length;
 
     val buf = new byte[32 + dLen + hLen];
-    arraycopy("NTLMSSP\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1), 0, buf, 0, 8);
+    arraycopy(SIGNATURE, 0, buf, 0, SIGNATURE.length);
     Le.u32(buf, 8, 1);
     Le.u32(buf, 12, flags);
     Le.u16(buf, 16, dLen);
@@ -126,20 +129,20 @@ public final class NtlmMessages {
     final byte[] uUser;
     final byte[] uHost;
     if (unicode) {
-      uDomain = toUnicode(creds.getDomain().toUpperCase());
+      uDomain = toUnicode(creds.getDomain().toUpperCase(Locale.ROOT));
       uUser = toUnicode(creds.getUser());
-      uHost = toUnicode(creds.getWorkstation().toUpperCase());
+      uHost = toUnicode(creds.getWorkstation().toUpperCase(Locale.ROOT));
     } else {
-      uDomain = toOem(creds.getDomain().toUpperCase());
-      uUser = toOem(creds.getUser().toUpperCase());
-      uHost = toOem(creds.getWorkstation().toUpperCase());
+      uDomain = toOem(creds.getDomain().toUpperCase(Locale.ROOT));
+      uUser = toOem(creds.getUser().toUpperCase(Locale.ROOT));
+      uHost = toOem(creds.getWorkstation().toUpperCase(Locale.ROOT));
     }
     int dLen = uDomain.length;
     int uLen = uUser.length;
     int hLen = uHost.length;
 
     val buf = new byte[NTLM_BUFSIZE];
-    arraycopy("NTLMSSP\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1), 0, buf, 0, 8);
+    arraycopy(SIGNATURE, 0, buf, 0, SIGNATURE.length);
     Le.u32(buf, 8, 3);
 
     // LM response security buffer

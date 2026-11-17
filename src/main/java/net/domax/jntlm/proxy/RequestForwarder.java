@@ -77,6 +77,7 @@ public class RequestForwarder {
         creds.setFlags(flagsResolver.flagsFor(request));
         try {
           server = new Endpoint(parentProxyManager.connect());
+          connectionPool.recordFreshConnection();
         } catch (IOException e) {
           log.error("Unable to connect to any parent proxy: {}", e.toString());
           trySend502(client, request);
@@ -123,6 +124,12 @@ public class RequestForwarder {
                 data1 = null;
               }
               if (data1 == null) {
+                if (wasCached && HttpIo.httpHasBody(data0, null) == 0) {
+                  retry = true;
+                  request = data0;
+                  server.close();
+                  continue beginning;
+                }
                 discard(server, creds);
                 return ForwardResult.close();
               }
@@ -266,7 +273,7 @@ public class RequestForwarder {
 
           ++loop;
         }
-      } while (connAlive && proxyAlive && !server.isPeerClosed() && !client.isPeerClosed());
+      } while (connAlive && proxyAlive && !client.isPeerClosed());
 
       // Bailout: cache the parent connection for reuse, or close it.
       finishConnection(server, creds, proxyAlive, authok);
@@ -277,7 +284,7 @@ public class RequestForwarder {
   /** Caches the parent connection when it can still be reused, otherwise closes it. */
   private void finishConnection(
       Endpoint server, Credentials creds, boolean proxyAlive, boolean authok) {
-    if (proxyAlive && authok && !server.isPeerClosed()) connectionPool.add(server, creds);
+    if (proxyAlive && authok) connectionPool.add(server, creds);
     else discard(server, creds);
   }
 

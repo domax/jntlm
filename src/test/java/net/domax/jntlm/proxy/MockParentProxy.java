@@ -41,6 +41,9 @@ final class MockParentProxy {
   private volatile long type2Flags = 0x00000200L;
   private volatile boolean requireAuth = true;
   private volatile long challengeDelayMs;
+  private volatile String responseBody = "hello";
+  private volatile boolean chunkedResponse;
+  private volatile boolean closeAfterResponse;
 
   void start() throws IOException {
     serverSocket = new ServerSocket();
@@ -101,6 +104,17 @@ final class MockParentProxy {
     return this;
   }
 
+  MockParentProxy responseBody(String body, boolean chunked) {
+    this.responseBody = body;
+    this.chunkedResponse = chunked;
+    return this;
+  }
+
+  MockParentProxy closeAfterResponse(boolean close) {
+    this.closeAfterResponse = close;
+    return this;
+  }
+
   void stop() {
     running = false;
     try {
@@ -140,7 +154,7 @@ final class MockParentProxy {
         received.add(new Received(req.method, req.url, type, flags, req.body));
 
         if (!requireAuth || authenticated) {
-          if (serve(req, in, out)) return;
+          if (serve(req, in, out, responseBody, chunkedResponse, closeAfterResponse)) return;
           continue;
         }
         if (type == 0 || type == 1) {
@@ -159,7 +173,7 @@ final class MockParentProxy {
             continue;
           }
           authenticated = true;
-          if (serve(req, in, out)) return;
+          if (serve(req, in, out, responseBody, chunkedResponse, closeAfterResponse)) return;
         } else {
           send407(out, null);
         }
@@ -170,14 +184,27 @@ final class MockParentProxy {
   }
 
   /** Serves an authorized request; returns {@code true} if the connection is finished. */
-  private static boolean serve(Request req, InputStream in, OutputStream out) throws IOException {
+  private static boolean serve(
+      Request req, InputStream in, OutputStream out, String body, boolean chunked)
+      throws IOException {
+    return serve(req, in, out, body, chunked, false);
+  }
+
+  private static boolean serve(
+      Request req,
+      InputStream in,
+      OutputStream out,
+      String body,
+      boolean chunked,
+      boolean closeAfterResponse)
+      throws IOException {
     if ("CONNECT".equals(req.method)) {
       sendConnectEstablished(out);
       echo(in, out);
       return true;
     }
-    sendOk(out);
-    return false;
+    sendOk(out, body, chunked);
+    return closeAfterResponse;
   }
 
   @SuppressWarnings("java:S2925")
@@ -269,19 +296,31 @@ final class MockParentProxy {
     out.flush();
   }
 
-  private static void sendOk(OutputStream out) throws IOException {
-    String body = "hello";
+  private static void sendOk(OutputStream out, String body, boolean chunked) throws IOException {
     String resp =
         "HTTP/1.1 200 OK\r\n"
             + "Content-Type: text/plain\r\n"
-            + "Content-Length: "
-            + body.length()
-            + "\r\n"
+            + (chunked
+                ? "Transfer-Encoding: chunked\r\n"
+                : "Content-Length: " + body.length() + "\r\n")
             + "Proxy-Connection: keep-alive\r\n"
-            + "Connection: keep-alive\r\n\r\n"
-            + body;
+            + "Connection: keep-alive\r\n\r\n";
     out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
+    if (chunked) {
+      int split = Math.max(1, body.length() / 2);
+      writeChunk(out, body.substring(0, split));
+      writeChunk(out, body.substring(split));
+      out.write("0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+    } else {
+      out.write(body.getBytes(StandardCharsets.ISO_8859_1));
+    }
     out.flush();
+  }
+
+  private static void writeChunk(OutputStream out, String body) throws IOException {
+    out.write((Integer.toHexString(body.length()) + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+    out.write(body.getBytes(StandardCharsets.ISO_8859_1));
+    out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
   }
 
   @SuppressWarnings("java:S6126")

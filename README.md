@@ -79,6 +79,10 @@ proxy**.
   `build/reports/jacoco/test/html`). See `ProxyForwardingIntegrationTest` for the pattern: an in-JVM
   `MockParentProxy` speaking the NTLM 407 handshake; wire real components manually
   (`new RequestForwarder(manager, pool, auth, creds)`).
+- **Performance smoke benchmark:** `./gradlew test --tests '*ProxyPerformanceBenchmarkTest'`
+  exercises keep-alive forwarding, fixed-length and chunked bodies, NTLM handshakes, and reports
+  elapsed time plus pool and fresh-connection counters. Run it repeatedly on the same JDK and
+  machine when comparing changes; it is a regression signal, not a hardware-independent target.
 - **Run locally:** activate the `local` profile — `application-local.yml` overrides `parents`,
   `flags`, and log levels for a real corporate proxy:
   ```shell

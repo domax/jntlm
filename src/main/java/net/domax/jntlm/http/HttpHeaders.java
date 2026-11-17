@@ -1,8 +1,7 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.http;
 
-import static java.util.Optional.ofNullable;
-
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -80,10 +79,8 @@ public final class HttpHeaders {
 
   /** Returns the value of the first header with the given name, or {@code null}. */
   @Nullable public String getFirst(String name) {
-    return ofNullable(headers.get(getKey(name))).stream()
-        .flatMap(h -> h.values.stream())
-        .findFirst()
-        .orElse(null);
+    val header = headers.get(getKey(name));
+    return header == null || header.values.isEmpty() ? null : header.values.iterator().next();
   }
 
   /** Returns true if any header with the given name exists. */
@@ -97,27 +94,31 @@ public final class HttpHeaders {
    */
   public boolean containsToken(String name, String token) {
     val lower = token.toLowerCase(Locale.ROOT);
-    return ofNullable(headers.get(getKey(name))).stream()
-        .flatMap(h -> h.values.stream())
-        .anyMatch(v -> v.toLowerCase(Locale.ROOT).contains(lower));
+    val header = headers.get(getKey(name));
+    if (header == null) return false;
+    for (val value : header.values) if (value.toLowerCase(Locale.ROOT).contains(lower)) return true;
+    return false;
   }
 
   /** Returns the copy of headers in order. */
   public List<Header> all() {
-    return headers.values().stream()
-        .flatMap(h -> h.values.stream().map(v -> new Header(h.name, v)))
-        .toList();
+    val result = new ArrayList<Header>();
+    for (val header : headers.values())
+      for (val value : header.values) result.add(new Header(header.name, value));
+    return List.copyOf(result);
+  }
+
+  /** Appends all headers directly to a wire-format builder without creating snapshot objects. */
+  public void appendTo(StringBuilder target) {
+    for (val header : headers.values())
+      for (val value : header.values)
+        target.append(header.name).append(": ").append(value).append("\r\n");
   }
 
   /** Returns a deep copy of these headers. */
   public HttpHeaders copy() {
-    val copy =
-        this.headers.entrySet().stream()
-            .map(e -> Map.entry(e.getKey(), e.getValue().copy()))
-            .collect(
-                LinkedHashMap<String, InnerHeader>::new,
-                (m, e) -> m.put(e.getKey(), e.getValue()),
-                Map::putAll);
+    val copy = new LinkedHashMap<String, InnerHeader>();
+    for (val entry : headers.entrySet()) copy.put(entry.getKey(), entry.getValue().copy());
     return new HttpHeaders(copy);
   }
 

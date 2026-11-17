@@ -158,7 +158,8 @@ rejected with 407, unless the last detection was less than the cool-down interva
 
 ### Requirement: Detection result logging
 The system SHALL log the accepted flags at INFO, as `0x`-prefixed 8-digit hex, together with the
-parent proxy. It SHALL log each rejected candidate and its reason at DEBUG.
+parent proxy. It SHALL log each rejected candidate and its reason at DEBUG without imposing
+material per-request overhead after the result is cached.
 
 #### Scenario: Successful detection log
 - **WHEN** detection accepts flags `0x00088205` for parent `proxy.example.com:8080`

@@ -1,8 +1,6 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.ntlm;
 
-import static java.util.Optional.ofNullable;
-
 import lombok.Data;
 import lombok.ToString.Exclude;
 import lombok.experimental.Accessors;
@@ -44,15 +42,18 @@ public final class Credentials {
   /** Optional manual NTLM negotiate flags; {@code 0} means "use the built-in default". */
   private long flags;
 
-  /** Returns a deep copy of these credentials (used per client-connection thread). */
+  /**
+   * Returns a connection-local copy. Password hashes are immutable after configuration and are
+   * shared to avoid cloning them for every fresh parent connection.
+   */
   public Credentials copy() {
     val c = new Credentials();
     c.user = user;
     c.domain = domain;
     c.workstation = workstation;
-    c.passLm = ofNullable(passLm).map(byte[]::clone).orElse(null);
-    c.passNt = ofNullable(passNt).map(byte[]::clone).orElse(null);
-    c.passNtlm2 = ofNullable(passNtlm2).map(byte[]::clone).orElse(null);
+    c.passLm = passLm;
+    c.passNt = passNt;
+    c.passNtlm2 = passNtlm2;
     c.hashNt = hashNt;
     c.hashLm = hashLm;
     c.hashNtlm2 = hashNtlm2;

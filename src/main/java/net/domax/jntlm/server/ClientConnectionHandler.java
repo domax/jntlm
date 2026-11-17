@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.http.HttpIo;
+import net.domax.jntlm.ntlm.NtlmCrypto;
 import net.domax.jntlm.proxy.Endpoint;
 import net.domax.jntlm.proxy.ForwardResult;
 import net.domax.jntlm.proxy.RequestForwarder;
@@ -46,6 +47,7 @@ public final class ClientConnectionHandler implements Runnable {
       log.debug("Client connection ended: {}", e.getMessage());
     } finally {
       client.close();
+      NtlmCrypto.cleanup(); // Clean up thread-local crypto state to avoid memory leaks.
     }
   }
 }
