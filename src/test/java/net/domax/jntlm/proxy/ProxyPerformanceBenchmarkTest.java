@@ -87,17 +87,15 @@ class ProxyPerformanceBenchmarkTest {
       int requestId = i;
       concurrent.add(
           Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try {
-                      assertEquals(
-                          "chunk".repeat(256),
-                          roundTrip(
-                              detectedForwarder, "http://example.com/concurrent/" + requestId));
-                    } catch (Throwable t) {
-                      failure.compareAndSet(null, t);
-                    }
-                  }));
+              .start(() -> {
+                try {
+                  assertEquals(
+                      "chunk".repeat(256),
+                      roundTrip(detectedForwarder, "http://example.com/concurrent/" + requestId));
+                } catch (Throwable t) {
+                  failure.compareAndSet(null, t);
+                }
+              }));
     }
     for (val task : concurrent) task.join(2000);
     if (failure.get() != null)

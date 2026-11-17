@@ -20,33 +20,30 @@ public final class NtlmCrypto {
   private NtlmCrypto() {}
 
   private static final ThreadLocal<Cipher> DES =
-      ThreadLocal.withInitial(
-          () -> {
-            try {
-              return Cipher.getInstance("DES/ECB/NoPadding"); // NOSONAR java:S5542
-            } catch (Exception e) {
-              throw new IllegalStateException("DES unavailable", e);
-            }
-          });
+      ThreadLocal.withInitial(() -> {
+        try {
+          return Cipher.getInstance("DES/ECB/NoPadding"); // NOSONAR java:S5542
+        } catch (Exception e) {
+          throw new IllegalStateException("DES unavailable", e);
+        }
+      });
 
   private static final ThreadLocal<MessageDigest> MD5 =
-      ThreadLocal.withInitial(
-          () -> {
-            try {
-              return MessageDigest.getInstance("MD5"); // NOSONAR java:S4790
-            } catch (Exception e) {
-              throw new IllegalStateException("MD5 unavailable", e);
-            }
-          });
+      ThreadLocal.withInitial(() -> {
+        try {
+          return MessageDigest.getInstance("MD5"); // NOSONAR java:S4790
+        } catch (Exception e) {
+          throw new IllegalStateException("MD5 unavailable", e);
+        }
+      });
   private static final ThreadLocal<Mac> HMAC_MD5 =
-      ThreadLocal.withInitial(
-          () -> {
-            try {
-              return Mac.getInstance("HmacMD5"); // NOSONAR java:S4790
-            } catch (Exception e) {
-              throw new IllegalStateException("HmacMD5 unavailable", e);
-            }
-          });
+      ThreadLocal.withInitial(() -> {
+        try {
+          return Mac.getInstance("HmacMD5"); // NOSONAR java:S4790
+        } catch (Exception e) {
+          throw new IllegalStateException("HmacMD5 unavailable", e);
+        }
+      });
 
   /**
    * Expands a 7-byte block into an 8-byte DES key by inserting a bit after every 7 bits. Mirrors
