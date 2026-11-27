@@ -30,6 +30,7 @@ final class MockParentProxy {
   record Received(String method, String url, int ntlmType, long type1Flags, String body) {}
 
   private ServerSocket serverSocket;
+  private Thread acceptThread;
   private volatile boolean running;
   private final AtomicInteger challenges = new AtomicInteger();
   private final AtomicInteger connections = new AtomicInteger();
@@ -50,7 +51,7 @@ final class MockParentProxy {
     serverSocket = new ServerSocket();
     serverSocket.bind(new InetSocketAddress("127.0.0.1", 0));
     running = true;
-    Thread.ofVirtual().start(this::acceptLoop);
+    acceptThread = Thread.ofVirtual().start(this::acceptLoop);
   }
 
   int port() {
@@ -121,12 +122,23 @@ final class MockParentProxy {
     return this;
   }
 
+  /**
+   * Stops accepting connections and waits for the accept loop to exit. On Linux, closing a
+   * listening socket while a virtual thread is blocked in {@code accept()} only releases the file
+   * descriptor once that thread wakes up, so without the join the port may still accept connections
+   * right after this method returns.
+   */
   void stop() {
     running = false;
     try {
       serverSocket.close();
     } catch (IOException ignored) {
       // ignore
+    }
+    try {
+      acceptThread.join(5000);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
     }
   }
 
