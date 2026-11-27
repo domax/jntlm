@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Tests for {@link NtlmFlagsResolver} against in-JVM {@link MockParentProxy} instances. */
+@SuppressWarnings("HttpUrlsUsage")
 class NtlmFlagsResolverTest {
 
   private static final long NTLMV2_DEFAULT = 0xa208b205L;
@@ -304,6 +305,8 @@ class NtlmFlagsResolverTest {
     parent.stop();
     manager.connect().close(); // fails over to the second parent
     assertEquals("127.0.0.1", manager.activeParent().host());
+    System.out.println(">> Active parent port: " + manager.activeParent().port());
+    System.out.println(">> Second port: " + second.port());
     assertEquals(second.port(), manager.activeParent().port());
 
     resolver.flagsFor(get("http://example.com/"));
