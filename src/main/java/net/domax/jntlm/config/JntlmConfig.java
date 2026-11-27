@@ -16,6 +16,7 @@ import lombok.val;
 import net.domax.jntlm.http.HttpLimits;
 import net.domax.jntlm.ntlm.Credentials;
 import net.domax.jntlm.ntlm.NtlmHashes;
+import net.domax.jntlm.proxy.ConnectionPool;
 import net.domax.jntlm.server.ClientAuthenticator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -71,6 +72,27 @@ public class JntlmConfig {
     if (l.getMaxClientConnections() < 0)
       throw invalid("max-client-connections", "must not be negative", l.getMaxClientConnections());
     return new HttpLimits(maxHeaderBytes, l.getMaxHeaderCount());
+  }
+
+  /**
+   * Creates the parent connection pool after validating {@code jntlm.pool.*} (failing startup with
+   * the offending property name). Not in CNTLM: the CNTLM pool is unbounded.
+   */
+  @Bean
+  public ConnectionPool connectionPool(JntlmProperties properties) {
+    validatePool(properties.getPool());
+    return new ConnectionPool(properties.getPool());
+  }
+
+  /** Validates the pool bounds; throws {@link IllegalStateException} naming the property. */
+  public static void validatePool(JntlmProperties.Pool pool) {
+    if (pool.getMaxIdle() < 0)
+      throw new IllegalStateException(
+          "jntlm.pool.max-idle must not be negative (was " + pool.getMaxIdle() + ")");
+    val timeout = pool.getIdleTimeout();
+    if (timeout == null || timeout.isZero() || timeout.isNegative())
+      throw new IllegalStateException(
+          "jntlm.pool.idle-timeout must be positive (was " + timeout + ")");
   }
 
   private static void checkDuration(String name, Duration d) {

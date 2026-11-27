@@ -41,6 +41,7 @@ public class RequestForwarder {
 
   private static final String BASIC_REALM =
       "Basic realm=\"JNTLM proxy authentication failed, credentials are invalid\"";
+  private static final String PARENT_CLOSED = "Parent proxy closed a reused connection.";
 
   private static final String PROXY_CONNECTION = "Proxy-Connection";
   private static final String PROXY_AUTHENTICATE = "Proxy-Authenticate";
@@ -231,6 +232,12 @@ public class RequestForwarder {
                   server.close();
                   continue beginning;
                 }
+                // Not in CNTLM: a stale pooled connection swallowed a request with a body that
+                // cannot be replayed - answer 502 instead of silently dropping the connection.
+                if (wasCached) {
+                  log.warn("Pooled parent connection closed before responding to a request body");
+                  trySendError(client, 502, PARENT_CLOSED, data0);
+                }
                 discard(server, creds);
                 return ForwardResult.close();
               }
@@ -337,8 +344,20 @@ public class RequestForwarder {
                       : client.socket()::getRemoteSocketAddress)
               .log();
           try {
-            HttpIo.sendHeaders(wOut, current);
+            // Not in CNTLM: small fixed-length bodies are coalesced with their headers.
+            val flush = !HttpIo.hasSmallFixedBody(data0, loop == 0 ? null : data1);
+            HttpIo.sendHeaders(wOut, current, flush);
           } catch (IOException e) {
+            // Not in CNTLM: a stale pooled connection may fail on write instead of on read.
+            if (loop == 0 && wasCached) {
+              if (HttpIo.httpHasBody(data0, null) == 0) {
+                retry = true;
+                request = data0;
+                server.close();
+                continue beginning;
+              }
+              trySendError(client, 502, PARENT_CLOSED, data0);
+            }
             discard(server, creds);
             return ForwardResult.close();
           }
@@ -351,14 +370,7 @@ public class RequestForwarder {
                   .addArgument(client.socket()::getRemoteSocketAddress)
                   .addArgument(server.socket()::getRemoteSocketAddress)
                   .log();
-              HttpIo.tunnel(
-                  client.in(),
-                  client.out(),
-                  client.socket(),
-                  server.in(),
-                  server.out(),
-                  server.socket(),
-                  tunnelIdleTimeout);
+              HttpIo.tunnel(client.tunnelEnd(), server.tunnelEnd(), tunnelIdleTimeout);
             } catch (Exception ignored) {
               // tunnel closes both ends; nothing more to relay
             }
@@ -372,6 +384,13 @@ public class RequestForwarder {
           try {
             HttpIo.sendBody(wOut, rIn, data0, bodyResponse, limits);
           } catch (IOException e) {
+            // Not in CNTLM: the request body hit a stale pooled connection (broken pipe/reset);
+            // it cannot be replayed, so answer 502 rather than dropping the client silently.
+            if (loop == 0 && wasCached && !(e instanceof SocketTimeoutException)) {
+              log.warn(
+                  "Pooled parent connection failed while sending a request body: {}", e.toString());
+              trySendError(client, 502, PARENT_CLOSED, data0);
+            }
             discard(server, creds);
             return ForwardResult.close();
           }

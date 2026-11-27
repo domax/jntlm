@@ -53,6 +53,23 @@ public class JntlmProperties {
   /** Header-size limits, timeouts and connection cap, bound from {@code jntlm.limits.*}. */
   private Limits limits = new Limits();
 
+  /** Idle parent-connection pool bounds, bound from {@code jntlm.pool.*}. */
+  private Pool pool = new Pool();
+
+  /**
+   * Bounds of the pool of idle, already-authenticated parent connections. Not in CNTLM: CNTLM's
+   * {@code connection_list} is unbounded and never evicts idle entries.
+   */
+  @Data
+  public static class Pool {
+
+    /** Maximum number of idle pooled parent connections; {@code 0} disables pooling. */
+    private int maxIdle = 64;
+
+    /** Idle pooled connections older than this are closed instead of reused (must be positive). */
+    private Duration idleTimeout = Duration.ofSeconds(60);
+  }
+
   /**
    * Resource limits protecting the proxy from oversized messages, stalled peers and connection
    * floods. Not in CNTLM. A zero duration or connection count disables that limit; header limits

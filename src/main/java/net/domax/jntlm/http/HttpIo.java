@@ -30,6 +30,16 @@ public final class HttpIo {
 
   private static final int BUFSIZE = 8192;
   private static final int MAX_LINE_LENGTH = 64 * 1024;
+
+  /** Largest fixed-length body sent in the same write as its headers. */
+  public static final int COALESCE_LIMIT = 8192;
+
+  /**
+   * Recommended buffered output size: holds typical headers plus a {@value #COALESCE_LIMIT} byte
+   * body, so a coalesced message leaves in one write.
+   */
+  public static final int OUTPUT_BUFFER_SIZE = 16 * 1024;
+
   private static final String EOL = "\r\n";
 
   private static final String TRANSFER_ENCODING = "Transfer-Encoding";
@@ -116,14 +126,39 @@ public final class HttpIo {
     return msg;
   }
 
-  /** Writes the start line, all headers and the terminating blank line. */
+  /** Writes the start line, all headers and the terminating blank line, then flushes. */
   public static void sendHeaders(OutputStream out, HttpMessage msg) throws IOException {
+    sendHeaders(out, msg, true);
+  }
+
+  /**
+   * Writes the start line, all headers and the terminating blank line, flushing only if {@code
+   * flush}. Not in CNTLM: callers skip the flush for {@linkplain #hasSmallFixedBody small bodies}
+   * so that headers and body leave in one write.
+   */
+  public static void sendHeaders(OutputStream out, HttpMessage msg, boolean flush)
+      throws IOException {
     val sb = new StringBuilder();
     sb.append(msg.startLine()).append(EOL);
     msg.getHeaders().appendTo(sb);
     sb.append(EOL);
     out.write(sb.toString().getBytes(StandardCharsets.ISO_8859_1));
-    out.flush();
+    if (flush) out.flush();
+  }
+
+  /**
+   * Returns true if the current message (the response, or the request when {@code response ==
+   * null}) has a non-chunked body of at most {@value #COALESCE_LIMIT} bytes, so its headers need
+   * not be flushed before the body ({@link #sendBody} flushes at the end). Requests carrying {@code
+   * Expect} are excluded: the client waits for an interim response before sending the body. Not in
+   * CNTLM.
+   */
+  public static boolean hasSmallFixedBody(HttpMessage request, HttpMessage response) {
+    val current = (response == null) ? request : response;
+    if (current == null || isChunked(current)) return false;
+    if (response == null && request.getHeaders().contains("Expect")) return false;
+    val len = httpHasBody(request, response);
+    return len > 0 && len <= COALESCE_LIMIT;
   }
 
   private static HttpMessage parseStatusLine(String line) throws HttpProtocolException {
@@ -413,40 +448,38 @@ public final class HttpIo {
   // ---------------------------------------------------------------- tunnel
 
   /**
-   * Full-duplex byte relay between two connections until either side closes. Ports {@code tunnel}.
-   * Used to bridge an established CONNECT tunnel. Operates on the (possibly buffered) streams so
-   * that no already-read bytes are lost, and closes both sockets when done.
+   * One side of a CONNECT tunnel: the buffered input (which may hold already-read bytes), the
+   * buffered output (which may hold unflushed bytes), the unbuffered socket output and the socket.
    */
-  public static void tunnel(
-      InputStream clientIn,
-      OutputStream clientOut,
-      Socket clientSocket,
-      InputStream serverIn,
-      OutputStream serverOut,
-      Socket serverSocket) {
-    tunnel(clientIn, clientOut, clientSocket, serverIn, serverOut, serverSocket, Duration.ZERO);
-  }
+  public record TunnelEnd(
+      HttpInputStream in, OutputStream out, OutputStream rawOut, Socket socket) {}
 
   /**
-   * As {@link #tunnel(InputStream, OutputStream, Socket, InputStream, OutputStream, Socket)}, but
-   * closes both sockets once no byte has moved in either direction for {@code idleTimeout}. Not in
-   * CNTLM. A zero timeout disables the check (both sockets block indefinitely, replacing any
-   * client-idle or parent-read timeout for the tunnel's lifetime).
+   * Full-duplex byte relay between two connections until either side closes. Ports {@code tunnel}.
+   * Used to bridge an established CONNECT tunnel, and closes both sockets when done.
+   *
+   * <p>Not in CNTLM: both buffered outputs are flushed and any bytes already buffered on either
+   * input are relayed first; then each direction copies with a {@value HttpInputStream#BUFFER_SIZE}
+   * byte buffer straight into the opposite unbuffered socket output (no per-read flush). Once no
+   * byte has moved in either direction for {@code idleTimeout}, both sockets are closed; a zero
+   * timeout disables the check (both sockets block indefinitely, replacing any client-idle or
+   * parent-read timeout for the tunnel's lifetime).
    */
-  public static void tunnel(
-      InputStream clientIn,
-      OutputStream clientOut,
-      Socket clientSocket,
-      InputStream serverIn,
-      OutputStream serverOut,
-      Socket serverSocket,
-      Duration idleTimeout) {
+  @SuppressWarnings("resource")
+  public static void tunnel(TunnelEnd client, TunnelEnd server, Duration idleTimeout) {
+    val clientSocket = client.socket();
+    val serverSocket = server.socket();
     val idleMs = idleTimeout == null || idleTimeout.isNegative() ? 0L : idleTimeout.toMillis();
     val soTimeout = (int) Math.min(idleMs, Integer.MAX_VALUE);
     try {
       clientSocket.setSoTimeout(soTimeout);
       serverSocket.setSoTimeout(soTimeout);
-    } catch (SocketException e) {
+      client.out().flush();
+      server.out().flush();
+      client.in().drainBuffered(server.rawOut());
+      server.in().drainBuffered(client.rawOut());
+    } catch (IOException e) {
+      log.debug("Tunnel setup failed: {}", e.toString());
       closeQuietly(clientSocket);
       closeQuietly(serverSocket);
       return;
@@ -454,10 +487,16 @@ public final class HttpIo {
     val lastActivity = new AtomicLong(System.nanoTime());
     val pump =
         Thread.ofVirtual()
-            .start(
-                () -> pump(clientIn, serverOut, clientSocket, serverSocket, idleMs, lastActivity));
+            .start(() ->
+                pump(
+                    client.in(),
+                    server.rawOut(),
+                    clientSocket,
+                    serverSocket,
+                    idleMs,
+                    lastActivity));
     try {
-      pump(serverIn, clientOut, clientSocket, serverSocket, idleMs, lastActivity);
+      pump(server.in(), client.rawOut(), clientSocket, serverSocket, idleMs, lastActivity);
     } finally {
       closeQuietly(clientSocket);
       closeQuietly(serverSocket);
@@ -472,7 +511,7 @@ public final class HttpIo {
   @SuppressWarnings({"java:S135", "java:S1141"})
   private static void pump(
       InputStream in, OutputStream out, Socket a, Socket b, long idleMs, AtomicLong lastActivity) {
-    val buf = new byte[BUFSIZE];
+    val buf = new byte[HttpInputStream.BUFFER_SIZE];
     try {
       while (true) {
         final int r;
@@ -489,7 +528,6 @@ public final class HttpIo {
         if (r <= 0) break;
         lastActivity.set(System.nanoTime());
         out.write(buf, 0, r);
-        out.flush();
       }
     } catch (SocketException se) {
       ofNullable(se.getMessage())
@@ -513,10 +551,12 @@ public final class HttpIo {
   /**
    * Reads a single line terminated by LF, keeping the terminator. Returns {@code null} on EOF
    * before any byte; raises {@link EOFException} on EOF mid-line, {@code overLimit} when longer
-   * than {@code max} bytes, and {@code malformed} on a CR not immediately followed by LF.
+   * than {@code max} bytes, and {@code malformed} on a CR not immediately followed by LF. Scans the
+   * buffer of an {@link HttpInputStream}; other streams are read byte by byte.
    */
   private static String readLine(InputStream in, int max, int overLimit, int malformed)
       throws IOException {
+    if (in instanceof HttpInputStream fast) return fast.readLine(max, overLimit, malformed);
     val baos = new ByteArrayOutputStream(128);
     int c;
     while ((c = in.read()) != -1) {

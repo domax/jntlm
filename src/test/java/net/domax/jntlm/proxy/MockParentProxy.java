@@ -51,6 +51,7 @@ final class MockParentProxy {
   private volatile boolean running;
   private final AtomicInteger challenges = new AtomicInteger();
   private final AtomicInteger connections = new AtomicInteger();
+  private final AtomicInteger openConnections = new AtomicInteger();
   private final List<Long> type1Flags = new CopyOnWriteArrayList<>();
   private final List<Received> received = new CopyOnWriteArrayList<>();
   private final List<String> proxyAuthorizations = new CopyOnWriteArrayList<>();
@@ -67,6 +68,9 @@ final class MockParentProxy {
   private volatile AfterRaw afterRaw = AfterRaw.KEEP;
   private volatile boolean noResponse;
   private volatile String challengeHeader;
+  private volatile boolean rawEcho;
+  private volatile String connectGreeting;
+  private volatile boolean closeAfterGreeting;
 
   void start() throws IOException {
     serverSocket = new ServerSocket();
@@ -85,6 +89,11 @@ final class MockParentProxy {
 
   int connectionsAccepted() {
     return connections.get();
+  }
+
+  /** Connections accepted and not yet closed by either side. */
+  int openConnections() {
+    return openConnections.get();
   }
 
   /** Negotiate flags of every Type-1 message received, in order. */
@@ -135,6 +144,22 @@ final class MockParentProxy {
   MockParentProxy responseBody(String body, boolean chunked) {
     this.responseBody = body;
     this.chunkedResponse = chunked;
+    return this;
+  }
+
+  /** CONNECT tunnels echo bytes unchanged instead of upper-casing them. */
+  MockParentProxy rawEcho(boolean raw) {
+    this.rawEcho = raw;
+    return this;
+  }
+
+  /**
+   * Sends {@code greeting} in the same write as the CONNECT {@code 200} response, then either
+   * echoes or (with {@code closeAfter}) closes the tunnel.
+   */
+  MockParentProxy connectGreeting(String greeting, boolean closeAfter) {
+    this.connectGreeting = greeting;
+    this.closeAfterGreeting = closeAfter;
     return this;
   }
 
@@ -192,7 +217,15 @@ final class MockParentProxy {
       try {
         Socket socket = serverSocket.accept();
         connections.incrementAndGet();
-        Thread.ofVirtual().start(() -> handle(socket));
+        openConnections.incrementAndGet();
+        Thread.ofVirtual()
+            .start(() -> {
+              try {
+                handle(socket);
+              } finally {
+                openConnections.decrementAndGet();
+              }
+            });
       } catch (IOException e) {
         return;
       }
@@ -255,8 +288,9 @@ final class MockParentProxy {
   /** Serves an authenticated request; returns {@code true} if the connection must end. */
   private boolean serve(Request req, InputStream in, OutputStream out) throws IOException {
     if ("CONNECT".equals(req.method)) {
-      sendConnectEstablished(out);
-      echo(in, out);
+      sendConnectEstablished(out, connectGreeting);
+      if (connectGreeting != null && closeAfterGreeting) return true;
+      echo(in, out, !rawEcho);
       return true;
     }
     String raw = rawResponse;
@@ -404,8 +438,10 @@ final class MockParentProxy {
   }
 
   @SuppressWarnings("java:S6126")
-  private static void sendConnectEstablished(OutputStream out) throws IOException {
-    String resp = "HTTP/1.1 200 Connection established\r\nProxy-Connection: keep-alive\r\n\r\n";
+  private static void sendConnectEstablished(OutputStream out, String greeting) throws IOException {
+    String resp =
+        "HTTP/1.1 200 Connection established\r\nProxy-Connection: keep-alive\r\n\r\n"
+            + (greeting == null ? "" : greeting);
     out.write(resp.getBytes(StandardCharsets.ISO_8859_1));
     out.flush();
   }
@@ -413,13 +449,14 @@ final class MockParentProxy {
   /**
    * Relays tunnelled bytes back to the caller, upper-casing each byte. The transform lets tests
    * distinguish a genuine client&harr;parent relay from a proxy that merely echoes the client's own
-   * bytes back to it (which a mis-wired tunnel would do).
+   * bytes back to it (which a mis-wired tunnel would do). With {@link #rawEcho} the bytes are
+   * relayed unchanged.
    */
-  private static void echo(InputStream in, OutputStream out) throws IOException {
-    byte[] buf = new byte[1024];
+  private static void echo(InputStream in, OutputStream out, boolean upperCase) throws IOException {
+    byte[] buf = new byte[16 * 1024];
     int n;
     while ((n = in.read(buf)) != -1) {
-      for (int i = 0; i < n; i++) {
+      for (int i = 0; upperCase && i < n; i++) {
         buf[i] = (byte) Character.toUpperCase(buf[i] & 0xff);
       }
       out.write(buf, 0, n);

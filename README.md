@@ -48,28 +48,28 @@ Request flow: **client → `ProxyServer` → `ClientConnectionHandler` → `Requ
 proxy**.
 
 * `server/`:
-    - `ProxyServer` is a Spring `SmartLifecycle` bean that binds a `ServerSocket` and runs an accept
-      loop; each client is handled on a **virtual thread** (`clientExecutor` in
-      `JntlmConfig`).
-    - `ClientConnectionHandler` loops per keep-alive request and follows
-      `ForwardResult.Type.REROUTE`. When enabled, it gates the first request of each connection
-      through `ClientAuthenticator` (optional BASIC client auth; not in CNTLM).
+  - `ProxyServer` is a Spring `SmartLifecycle` bean that binds a `ServerSocket` and runs an accept
+    loop; each client is handled on a **virtual thread** (`clientExecutor` in
+    `JntlmConfig`).
+  - `ClientConnectionHandler` loops per keep-alive request and follows
+    `ForwardResult.Type.REROUTE`. When enabled, it gates the first request of each connection
+    through `ClientAuthenticator` (optional BASIC client auth; not in CNTLM).
 * `proxy/`:
-    - `RequestForwarder` is the core engine (a faithful port of CNTLM's `forward_request`; keep the
-      labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
-    - `ProxyAuthenticator` runs the NTLM 407 handshake;
-    - `ConnectionPool` caches already-authenticated parent connections (NTLM auth is bound to a TCP
-      connection, so reuse skips re-auth);
-    - `ParentProxyManager` does round-robin failover over `jntlm.parents`;
-    - `NtlmFlagsResolver` detects and caches working NTLM negotiate flags for the active parent.
+  - `RequestForwarder` is the core engine (a faithful port of CNTLM's `forward_request`; keep the
+    labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
+  - `ProxyAuthenticator` runs the NTLM 407 handshake;
+  - `ConnectionPool` caches already-authenticated parent connections (NTLM auth is bound to a TCP
+    connection, so reuse skips re-auth), bounded by `jntlm.pool.*` with idle eviction;
+  - `ParentProxyManager` does round-robin failover over `jntlm.parents`;
+  - `NtlmFlagsResolver` detects and caches working NTLM negotiate flags for the active parent.
 * `ntlm/` — pure NTLM crypto/message building (`NtlmMessages`, `NtlmFlags`, `NtlmHashes`,
   `NtlmCrypto`, `Md4`).
   All multibyte fields are **little-endian** (`Le`). `Credentials` holds dialect switches + hashes.
 * `http/` — hand-rolled HTTP wire I/O (`HttpIo`, `HttpMessage`, `HttpHeaders`); no servlet stack.
 * `config/`:
-    - `JntlmProperties` (`@ConfigurationProperties(prefix="jntlm")`) + `JntlmConfig`
-      builds the global `Credentials` bean;
-    - `AuthMode` maps dialects to hash switches.
+  - `JntlmProperties` (`@ConfigurationProperties(prefix="jntlm")`) + `JntlmConfig`
+    builds the global `Credentials` bean;
+  - `AuthMode` maps dialects to hash switches.
 
 ## Developer workflows
 
@@ -81,9 +81,11 @@ proxy**.
   `MockParentProxy` speaking the NTLM 407 handshake; wire real components manually
   (`new RequestForwarder(manager, pool, auth, creds)`).
 - **Performance smoke benchmark:** `./gradlew test --tests '*ProxyPerformanceBenchmarkTest'`
-  exercises keep-alive forwarding, fixed-length and chunked bodies, NTLM handshakes, and reports
-  elapsed time plus pool and fresh-connection counters. Run it repeatedly on the same JDK and
-  machine when comparing changes; it is a regression signal, not a hardware-independent target.
+  exercises keep-alive forwarding, fixed-length and chunked bodies, NTLM handshakes, an 8 MiB
+  `CONNECT` echo (MB/s), a 32-client burst followed by idle pool drain, and header parsing, and
+  reports elapsed time plus pool, fresh-connection and eviction counters. Run it repeatedly on the
+  same JDK and machine when comparing changes; it is a regression signal, not a hardware-independent
+  target.
 - **Run locally:** activate the `local` profile — `application-local.yml` overrides `parents`,
   `flags`, and log levels for a real corporate proxy:
   ```shell
@@ -168,6 +170,8 @@ Configured via `jntlm.*` properties (see `application.yml` for the annotated def
 | `jntlm.limits.parent-read-timeout`    | Parent silent this long → 504, or abort a body (default `600s`; `0` = never).                       |
 | `jntlm.limits.tunnel-idle-timeout`    | Close a `CONNECT` tunnel idle in both directions (default `0` = never).                             |
 | `jntlm.limits.max-client-connections` | Max concurrent client connections; extra ones get 503 (default `1024`; `0` = unlimited).            |
+| `jntlm.pool.max-idle`                 | Max idle pooled parent connections; oldest closed beyond it (default `64`; `0` = no pooling).       |
+| `jntlm.pool.idle-timeout`             | Close pooled parent connections idle this long (default `60s`; must be positive).                   |
 
 Credentials: supply **either** a plaintext `password` (hashes derived at startup in `JntlmConfig`)
 **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
@@ -183,11 +187,11 @@ jntlm:
     enabled: true
     realm: jntlm
     users:
-      - username: alice
-        password: "${JNTLM_ALICE_PASSWORD}"
-      - username: bob
-        # printf %s 'secret' | shasum -a 256
-        password: "{sha256}2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
+    - username: alice
+      password: "${JNTLM_ALICE_PASSWORD}"
+    - username: bob
+      # printf %s 'secret' | shasum -a 256
+      password: "{sha256}2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
 ```
 
 ```shell
@@ -220,6 +224,11 @@ Not in CNTLM — jntlm is stricter than its parser so that message boundaries ar
   parent.
 - A parent connection is returned to the pool only after a cleanly framed exchange (explicit
   `Content-Length` or chunked, no `Connection: close`).
+- The pool holds at most `jntlm.pool.max-idle` connections and closes any idle longer than
+  `jntlm.pool.idle-timeout` (on reuse and by a background sweep), so parent-closed sockets do not
+  linger in `CLOSE_WAIT`. If a reused pooled connection turns out to be closed, a body-less request
+  is retried on a fresh connection; a request with a body (which cannot be replayed) gets `502 Bad
+  Gateway` instead of a silent close.
 - At startup, a WARN is logged when the listener is reachable from other hosts (non-loopback
   `listen-address`) while client authentication is disabled.
 - Each timeout is disabled with `0` (e.g. `jntlm.limits.client-idle-timeout: 0`), and

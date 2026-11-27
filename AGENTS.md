@@ -19,7 +19,9 @@ proxy**.
 - `proxy/` — `RequestForwarder` is the core engine (a faithful port of CNTLM's `forward_request`;
   keep the labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
   `ProxyAuthenticator` runs the NTLM 407 handshake; `ConnectionPool` caches already-authenticated
-  parent connections (NTLM auth is bound to a TCP connection, so reuse skips re-auth);
+  parent connections (NTLM auth is bound to a TCP connection, so reuse skips re-auth); it is bounded
+  (`jntlm.pool.max-idle`) with idle eviction (`jntlm.pool.idle-timeout`, on `pop` + a background
+  sweeper; created and validated in `JntlmConfig`, not a `@Component`);
   `ParentProxyManager` does round-robin failover over `jntlm.parents`; `NtlmFlagsResolver`
   resolves per-parent negotiate flags (eager probe via `jntlm.detect.probe-url` at startup or lazy
   on first request, then cache/re-detect on rejection cooldown).
@@ -27,6 +29,8 @@ proxy**.
   `NtlmCrypto`, `Md4`).
   All multibyte fields are **little-endian** (`Le`). `Credentials` holds dialect switches + hashes.
 - `http/` — hand-rolled HTTP wire I/O (`HttpIo`, `HttpMessage`, `HttpHeaders`); no servlet stack.
+  `Endpoint.in()` is an unsynchronized `HttpInputStream` (fast `readLine`, `drainBuffered` for the
+  CONNECT tunnel, peek for `isPeerClosed`); `Endpoint.rawOut()` is the unbuffered socket output.
 - `config/` — `JntlmProperties` (`@ConfigurationProperties(prefix="jntlm")`) + `JntlmConfig`
   builds the global `Credentials` bean; `AuthMode` maps dialects to hash switches.
 

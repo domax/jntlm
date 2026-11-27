@@ -79,6 +79,13 @@ jntlm:
     # Max concurrent client connections; extra ones get 503.
     max-client-connections: 1024
 
+  # Pool of idle, already-authenticated parent connections (not in CNTLM).
+  pool:
+    # Max idle pooled connections; the oldest is closed beyond this. 0 disables pooling.
+    max-idle: 64
+    # Idle pooled connections older than this are closed instead of reused.
+    idle-timeout: 60s
+
   # Ordered list of parent proxies, "host:port". Tried top-to-bottom with
   # round-robin failover if one becomes unreachable.
   parents:

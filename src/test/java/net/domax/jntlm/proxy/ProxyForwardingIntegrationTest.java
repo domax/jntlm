@@ -1,7 +1,9 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.proxy;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -10,7 +12,9 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import java.util.Random;
 import lombok.val;
 import net.domax.jntlm.config.JntlmConfig;
 import net.domax.jntlm.config.JntlmProperties;
@@ -24,6 +28,7 @@ import org.junit.jupiter.api.Test;
  * NTLM 407 handshake. Exercises the full {@link RequestForwarder} + {@link ProxyAuthenticator} +
  * {@link ConnectionPool} + {@link ParentProxyManager} stack.
  */
+@SuppressWarnings("resource")
 class ProxyForwardingIntegrationTest {
 
   private MockParentProxy parent;
@@ -54,7 +59,7 @@ class ProxyForwardingIntegrationTest {
   /** (Re)builds the forwarding stack from {@link #props}. */
   private void wire() {
     val creds = new JntlmConfig().globalCredentials(props);
-    pool = new ConnectionPool();
+    pool = new ConnectionPool(props.getPool());
     val manager = new ParentProxyManager(props, pool);
     val auth = new ProxyAuthenticator(manager);
     val resolver = new NtlmFlagsResolver(manager, creds, props);
@@ -223,6 +228,132 @@ class ProxyForwardingIntegrationTest {
     parent.closeAfterResponse(true);
     assertEquals(200, roundTrip(get("http://example.com/first")).status());
     assertEquals(200, roundTrip(get("http://example.com/second")).status());
+  }
+
+  @Test
+  void answers502WhenPooledParentClosedBeforePostWithBody() throws Exception {
+    parent.closeAfterResponse(true);
+    assertEquals(200, roundTrip(get("http://example.com/first")).status());
+    assertEquals(1, pool.idleCount(), "the first parent connection must be pooled");
+
+    val body = "do-not-replay";
+    val post = HttpMessage.newRequest("POST", "http://example.com/api", "HTTP/1.1");
+    post.setHost("example.com");
+    post.getHeaders().add("Host", "example.com");
+    post.getHeaders().add("Proxy-Connection", "keep-alive");
+    post.getHeaders().add("Content-Length", String.valueOf(body.length()));
+
+    val testClient = new Socket();
+    testClient.connect(clientListener.getLocalSocketAddress());
+    testClient.setSoTimeout(5000);
+    val clientEp = new Endpoint(clientListener.accept());
+    testClient.getOutputStream().write(body.getBytes(StandardCharsets.ISO_8859_1));
+    testClient.getOutputStream().flush();
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, post));
+    val r = readResponse(testClient.getInputStream());
+    testClient.close();
+    t.join(2000);
+
+    assertEquals(502, r.status());
+    assertTrue(
+        parent.received().stream().filter(x -> "POST".equals(x.method())).count() <= 1,
+        "the POST must not be replayed");
+  }
+
+  @SuppressWarnings("java:S2925")
+  @Test
+  void expiredPooledConnectionIsNotReused() throws Exception {
+    props.getPool().setIdleTimeout(Duration.ofSeconds(1));
+    wire();
+    assertEquals(200, roundTrip(get("http://example.com/first")).status());
+    assertEquals(1, pool.idleCount());
+    Thread.sleep(2000);
+    assertEquals(200, roundTrip(get("http://example.com/second")).status());
+    assertEquals(2, parent.connectionsAccepted(), "an expired connection must not be reused");
+    assertEquals(2, parent.challengesSent());
+  }
+
+  @Test
+  void tunnelRelaysEightMegabytesByteIdentical() throws Exception {
+    parent.rawEcho(true);
+    val tunnel = openTunnel();
+    val data = new byte[8 * 1024 * 1024];
+    new Random(7).nextBytes(data);
+    val writer =
+        Thread.ofVirtual()
+            .start(() -> {
+              try {
+                tunnel.client().getOutputStream().write(data);
+                tunnel.client().getOutputStream().flush();
+              } catch (IOException ignored) {
+                // reader assertion reports the failure
+              }
+            });
+    val echoed = tunnel.client().getInputStream().readNBytes(data.length);
+    writer.join(5000);
+    assertArrayEquals(data, echoed);
+    tunnel.close();
+  }
+
+  @Test
+  void bytesSentWithConnectResponseArriveFirst() throws Exception {
+    parent.connectGreeting("GREETING", false);
+    val tunnel = openTunnel();
+    val in = tunnel.client().getInputStream();
+    assertEquals("GREETING", new String(in.readNBytes(8), StandardCharsets.ISO_8859_1));
+    tunnel.client().getOutputStream().write("later".getBytes(StandardCharsets.ISO_8859_1));
+    tunnel.client().getOutputStream().flush();
+    assertEquals("LATER", new String(in.readNBytes(5), StandardCharsets.ISO_8859_1));
+    tunnel.close();
+  }
+
+  @Test
+  void parentClosingTunnelClosesClient() throws Exception {
+    parent.connectGreeting("BYE", true);
+    val tunnel = openTunnel();
+    val in = tunnel.client().getInputStream();
+    assertEquals("BYE", new String(in.readNBytes(3), StandardCharsets.ISO_8859_1));
+    tunnel.client().setSoTimeout(5000);
+    assertEquals(-1, in.read(), "client side must be closed when the parent closes");
+    tunnel.forwarder().join(5000);
+    assertFalse(tunnel.forwarder().isAlive());
+    tunnel.close();
+  }
+
+  @Test
+  void clientClosingTunnelEndsRelay() throws Exception {
+    val tunnel = openTunnel();
+    tunnel.client().close();
+    tunnel.forwarder().join(5000);
+    assertFalse(tunnel.forwarder().isAlive(), "the tunnel must end when the client closes");
+  }
+
+  private record Tunnel(Socket client, Thread forwarder) {
+    void close() throws Exception {
+      client.close();
+      forwarder.join(2000);
+    }
+  }
+
+  /** Opens a CONNECT tunnel through the forwarder and consumes the {@code 200} headers. */
+  @SuppressWarnings("StatementWithEmptyBody")
+  private Tunnel openTunnel() throws Exception {
+    val testClient = new Socket();
+    testClient.connect(clientListener.getLocalSocketAddress());
+    testClient.setSoTimeout(10_000);
+    val clientEp = new Endpoint(clientListener.accept());
+    val connect = HttpMessage.newRequest("CONNECT", "example.com:443", "HTTP/1.1");
+    connect.setHost("example.com");
+    connect.setPort(443);
+    connect.getHeaders().add("Host", "example.com:443");
+    val t = Thread.ofVirtual().start(() -> forwarder.forward(clientEp, connect));
+    val in = testClient.getInputStream();
+    val status = readLine(in);
+    assertTrue(status.contains(" 200 "), status);
+    while (!readLine(in).isEmpty()) {
+      // skip headers
+    }
+    return new Tunnel(testClient, t);
   }
 
   /** Sends {@code request} over a new client connection and returns the parent's response. */
