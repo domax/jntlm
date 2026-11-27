@@ -13,6 +13,9 @@ proxy**.
   an accept loop; each client is handled on a **virtual thread** (`clientExecutor` in
   `JntlmConfig`).
   `ClientConnectionHandler` loops per keep-alive request and follows `ForwardResult.Type.REROUTE`.
+  When `jntlm.client-auth.enabled`, it gates the first request of each connection through
+  `ClientAuthenticator` (BASIC; jntlm-only, not in CNTLM): reject → 407 + close, accept → the rest
+  of the connection is trusted. `RequestForwarder` is untouched by this.
 - `proxy/` — `RequestForwarder` is the core engine (a faithful port of CNTLM's `forward_request`;
   keep the labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
   `ProxyAuthenticator` runs the NTLM 407 handshake; `ConnectionPool` caches already-authenticated

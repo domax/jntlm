@@ -11,11 +11,31 @@ spring:
   profiles.include: custom
 
 jntlm:
-  version: "1.2.0"
+  version: "1.3.0"
 
   # Local listener. Bind to 127.0.0.1 so only this machine can use the proxy.
   listen-address: 127.0.0.1
   listen-port: 3128
+
+  # Optional HTTP BASIC authentication required from clients of this proxy
+  # (useful when listen-address is opened beyond 127.0.0.1). Disabled by default.
+  # Clients authenticate once per connection, e.g.
+  #   curl -x http://alice:secret@127.0.0.1:3128 https://example.com
+  # NOTE: BASIC sends credentials base64-encoded in clear text - use on trusted
+  # networks only.
+  client-auth:
+    enabled: false
+    # Realm shown in the Proxy-Authenticate challenge.
+    realm: jntlm
+    # Accepted users. A password is either plaintext (an env placeholder is
+    # recommended) or "{sha256}<hex>" - the hex SHA-256 of the UTF-8 password,
+    # e.g. from: printf %s 'secret' | shasum -a 256
+    users: []
+    # users:
+    #   - username: alice
+    #     password: "${JNTLM_ALICE_PASSWORD}"
+    #   - username: bob
+    #     password: "{sha256}2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
 
   # NTLM dialect used when authenticating to the parent proxy. One of:
   #   NTLMV2  - NTLMv2 only (most secure, recommended default)

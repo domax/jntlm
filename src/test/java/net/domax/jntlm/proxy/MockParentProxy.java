@@ -35,6 +35,7 @@ final class MockParentProxy {
   private final AtomicInteger connections = new AtomicInteger();
   private final List<Long> type1Flags = new CopyOnWriteArrayList<>();
   private final List<Received> received = new CopyOnWriteArrayList<>();
+  private final List<String> proxyAuthorizations = new CopyOnWriteArrayList<>();
 
   private final Set<Long> rejectType1 = ConcurrentHashMap.newKeySet();
   private final Set<Long> rejectType3 = ConcurrentHashMap.newKeySet();
@@ -72,6 +73,11 @@ final class MockParentProxy {
   /** Every request received, in order. */
   List<Received> received() {
     return received;
+  }
+
+  /** Every non-null {@code Proxy-Authorization} header value received, in order. */
+  List<String> proxyAuthorizations() {
+    return proxyAuthorizations;
   }
 
   /** Replies 407 without an NTLM challenge to Type-1 messages carrying any of these flags. */
@@ -149,6 +155,7 @@ final class MockParentProxy {
           return;
         }
         byte[] ntlm = ntlmBlob(req.proxyAuthorization);
+        if (req.proxyAuthorization != null) proxyAuthorizations.add(req.proxyAuthorization);
         int type = ntlm == null || ntlm.length < 12 ? 0 : (int) u32(ntlm, 8);
         long flags = type == 1 && ntlm.length >= 16 ? u32(ntlm, 12) : -1;
         received.add(new Received(req.method, req.url, type, flags, req.body));
@@ -181,13 +188,6 @@ final class MockParentProxy {
     } catch (IOException ignored) {
       // connection ended
     }
-  }
-
-  /** Serves an authorized request; returns {@code true} if the connection is finished. */
-  private static boolean serve(
-      Request req, InputStream in, OutputStream out, String body, boolean chunked)
-      throws IOException {
-    return serve(req, in, out, body, chunked, false);
   }
 
   private static boolean serve(

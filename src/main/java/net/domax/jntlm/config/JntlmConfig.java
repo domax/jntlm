@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.ntlm.Credentials;
 import net.domax.jntlm.ntlm.NtlmHashes;
+import net.domax.jntlm.server.ClientAuthenticator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -33,6 +34,21 @@ public class JntlmConfig {
   ExecutorService clientExecutor() {
     return Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("jntlm-client-", 0).factory());
+  }
+
+  /**
+   * Creates the optional client BASIC authenticator (jntlm-only, not in CNTLM). Fails startup on
+   * invalid {@code jntlm.client-auth} configuration when enabled.
+   */
+  @Bean
+  public ClientAuthenticator clientAuthenticator(JntlmProperties properties) {
+    val auth = ClientAuthenticator.from(properties.getClientAuth());
+    if (auth.enabled())
+      log.info(
+          "Client authentication enabled for {} user(s), realm '{}'",
+          auth.userCount(),
+          auth.realm());
+    return auth;
   }
 
   /** Creates the global NTLM credentials from the configured properties. */

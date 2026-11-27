@@ -11,9 +11,9 @@
 ---
 
 A Java 21 / Spring Boot rewrite of the [CNTLM](https://cntlm.sourceforge.net/)
-NTLM-authenticating HTTP proxy. It listens locally (unauthenticated) and transparently performs the
-NTLM handshake to a corporate parent proxy, so tools that cannot speak NTLM themselves can reach the
-internet through the local port.
+NTLM-authenticating HTTP proxy. It listens locally (unauthenticated by default, with optional BASIC
+client authentication) and transparently performs the NTLM handshake to a corporate parent proxy, so
+tools that cannot speak NTLM themselves can reach the internet through the local port.
 
 This implementation was designed to be as lightweight as possible, with no servlet stack or Spring
 MVC. It uses raw `Socket`/`ServerSocket` networking and virtual threads for concurrency. It is a
@@ -52,7 +52,8 @@ proxy**.
       loop; each client is handled on a **virtual thread** (`clientExecutor` in
       `JntlmConfig`).
     - `ClientConnectionHandler` loops per keep-alive request and follows
-      `ForwardResult.Type.REROUTE`.
+      `ForwardResult.Type.REROUTE`. When enabled, it gates the first request of each connection
+      through `ClientAuthenticator` (optional BASIC client auth; not in CNTLM).
 * `proxy/`:
     - `RequestForwarder` is the core engine (a faithful port of CNTLM's `forward_request`; keep the
       labeled two-pass `loop 0 = client→parent`, `loop 1 = parent→client` structure).
@@ -148,19 +149,57 @@ stopping the process:
 
 Configured via `jntlm.*` properties (see `application.yml` for the annotated defaults):
 
-| Property                 | Purpose                                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------------------|
-| `jntlm.listen-address`   | Local bind address (default `127.0.0.1`, loopback only).                                            |
-| `jntlm.listen-port`      | Local listener port (default `3128`).                                                               |
-| `jntlm.auth`             | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.                                    |
-| `jntlm.flags`            | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
-| `jntlm.detect.enabled`   | Auto-detect working negotiate flags (default `true`; see below).                                    |
-| `jntlm.detect.probe-url` | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).                               |
-| `jntlm.parents`          | Ordered `host:port` parent proxies with round-robin failover.                                       |
-| `jntlm.credentials.*`    | `username`, `domain`, `workstation`, and password/hashes.                                           |
+| Property                    | Purpose                                                                                             |
+|-----------------------------|-----------------------------------------------------------------------------------------------------|
+| `jntlm.listen-address`      | Local bind address (default `127.0.0.1`, loopback only).                                            |
+| `jntlm.listen-port`         | Local listener port (default `3128`).                                                               |
+| `jntlm.auth`                | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.                                    |
+| `jntlm.flags`               | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
+| `jntlm.detect.enabled`      | Auto-detect working negotiate flags (default `true`; see below).                                    |
+| `jntlm.detect.probe-url`    | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).                               |
+| `jntlm.parents`             | Ordered `host:port` parent proxies with round-robin failover.                                       |
+| `jntlm.credentials.*`       | `username`, `domain`, `workstation`, and password/hashes.                                           |
+| `jntlm.client-auth.enabled` | Require BASIC proxy auth from clients (default `false`; see below).                                 |
+| `jntlm.client-auth.realm`   | Realm in the `Proxy-Authenticate` challenge (default `jntlm`).                                      |
+| `jntlm.client-auth.users`   | Accepted clients: `username` + `password` (plaintext or `{sha256}<hex>`).                           |
 
 Credentials: supply **either** a plaintext `password` (hashes derived at startup in `JntlmConfig`)
 **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
+
+### Client authentication
+
+By default anyone who can reach `listen-address:listen-port` can use the proxy (and thus your NTLM
+identity). When you open the listener beyond `127.0.0.1`, enable BASIC client authentication:
+
+```yaml
+jntlm:
+  client-auth:
+    enabled: true
+    realm: jntlm
+    users:
+      - username: alice
+        password: "${JNTLM_ALICE_PASSWORD}"
+      - username: bob
+        # printf %s 'secret' | shasum -a 256
+        password: "{sha256}2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
+```
+
+```shell
+curl -x http://alice:secret@127.0.0.1:3128 https://example.com
+```
+
+- The first request on each client connection must carry valid `Proxy-Authorization: Basic ...`
+  credentials; later keep-alive requests on the same connection are not re-checked. Otherwise jntlm
+  replies `407` with `Proxy-Authenticate: Basic realm="..."` and closes the connection, without
+  contacting the parent.
+- Usernames are case-sensitive. The client's credentials are never forwarded to the parent proxy,
+  and passwords are never logged (failed attempts are logged at WARN with address and username).
+- Invalid configuration (no users, blank/duplicate username, blank password, malformed digest)
+  stops startup.
+
+> Caveat: BASIC sends credentials base64-encoded in **clear text**, and `{sha256}` digests are
+> unsalted. This deters casual use on trusted networks; it is not a substitute for network-level
+> protection.
 
 ### Flag auto-detection
 

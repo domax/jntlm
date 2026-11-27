@@ -5,6 +5,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
+import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -43,6 +44,40 @@ public class JntlmProperties {
   private List<String> parents = new ArrayList<>();
 
   private Credentials credentials = new Credentials();
+
+  /** Optional BASIC authentication of incoming clients, bound from {@code jntlm.client-auth.*}. */
+  private ClientAuth clientAuth = new ClientAuth();
+
+  /**
+   * Optional HTTP BASIC proxy authentication required from clients connecting to the jntlm
+   * listener. Not in CNTLM: a jntlm-only addition.
+   */
+  @Data
+  public static class ClientAuth {
+
+    /** Whether clients must authenticate. Default {@code false} (open listener, as in CNTLM). */
+    private boolean enabled = false;
+
+    /** Realm advertised in the {@code Proxy-Authenticate: Basic realm="..."} challenge. */
+    private String realm = "jntlm";
+
+    /** Accepted client accounts. */
+    private List<User> users = new ArrayList<>();
+  }
+
+  /**
+   * A client account. The {@code password} is either plaintext or {@code {sha256}<hex>} (the hex
+   * SHA-256 digest of the UTF-8 password).
+   */
+  @Data
+  public static class User {
+
+    /** Client username (case-sensitive, must not contain {@code :}). */
+    private String username = "";
+
+    /** Plaintext password or {@code {sha256}<64 hex digits>}. */
+    @ToString.Exclude private String password = "";
+  }
 
   /** NTLM negotiate-flags auto-detection settings. */
   @Data

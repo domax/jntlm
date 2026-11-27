@@ -1,0 +1,35 @@
+# Tasks
+
+## 1. Configuration properties
+
+- [x] 1.1 In `config/JntlmProperties`, add `private ClientAuth clientAuth = new ClientAuth();` with nested `@Data public static class ClientAuth { boolean enabled = false; String realm = "jntlm"; List<User> users = new ArrayList<>(); }` and `@Data public static class User { String username = ""; @ToString.Exclude String password = ""; }`, each with Javadoc matching the existing style (design §5). Verify `./gradlew compileJava` succeeds.
+- [x] 1.2 In `src/main/resources/application.yml`, add a commented `client-auth:` block under `jntlm:` (after `listen-port`) with `enabled: false`, `realm: jntlm`, `users: []`, plus commented example entries for a `${ENV}` plaintext password and a `{sha256}<hex>` password, and a note that BASIC sends credentials in clear text. Verify the app context still loads via `./gradlew test` (existing tests stay green).
+
+## 2. ClientAuthenticator
+
+- [x] 2.1 Create `server/ClientAuthenticator` (file header `/* JNTLM © Licensed under MIT 2026. */`, Lombok `@Slf4j`, fluent `enabled()` accessor) with static factories `disabled()` and `from(JntlmProperties.ClientAuth)`. `from` returns `disabled()` when `enabled` is false (no validation); otherwise validates per design §1/§3 and the spec "Invalid configuration fails startup" (empty users; blank username or containing `:`; blank password; `{sha256}` digest not 64 hex digits; duplicate username; realm blank or containing `"`, `\` or control chars), throwing `IllegalStateException` naming the user/field but never the password. Normalize every password to a SHA-256 digest into an immutable map. Javadoc that this is a jntlm-only feature with no CNTLM counterpart. Verify with task 2.4.
+- [x] 2.2 Implement `check(HttpMessage request)` returning a small result record (`accepted`, `reason`, nullable `username`) per design §3: absent header → `missing credentials`; non-`Basic` scheme → `unsupported scheme`; bad base64 / no colon → `malformed credentials`; split at first `:`, UTF-8 decode, SHA-256 the password, compare with `MessageDigest.isEqual` against the user's digest or a fixed dummy digest for unknown users → `invalid credentials` on mismatch. Verify with task 2.4.
+- [x] 2.3 Implement `sendChallenge(Endpoint client, HttpMessage request)` per design §4: `407 Proxy Authentication Required` using the request protocol (fallback `HTTP/1.1`), headers `Proxy-Authenticate: Basic realm="<realm>"`, `Content-Type: text/html`, `Content-Length`, `Connection: close`, `Proxy-Connection: close`, short HTML body, then flush. Verify with task 2.4.
+- [x] 2.4 Add `src/test/java/net/domax/jntlm/server/ClientAuthenticatorTest` covering: disabled factory (and disabled with invalid users does not throw); each startup-validation failure from 2.1; plaintext match; `{sha256}`/`{SHA256}` match with uppercase hex; password containing `:`; username case mismatch rejected; wrong password; missing header; `NTLM` scheme; malformed base64; no colon; `sendChallenge` output (status line, exact `Proxy-Authenticate` with default and custom realm, `Connection: close`, correct `Content-Length`) using a socket pair or `ByteArrayOutputStream`-backed endpoint. Verify `./gradlew test --tests '*ClientAuthenticatorTest'` passes.
+
+## 3. Wiring into the connection handler
+
+- [x] 3.1 In `config/JntlmConfig`, add `@Bean ClientAuthenticator clientAuthenticator(JntlmProperties properties)` calling `ClientAuthenticator.from(properties.getClientAuth())`, and log INFO `Client authentication enabled for N user(s), realm '<realm>'` when enabled (design §6). Verify `./gradlew compileJava` succeeds and app startup with defaults logs nothing new.
+- [x] 3.2 In `server/ClientConnectionHandler`, add final field `ClientAuthenticator clientAuth`; in `run()` keep a local `authenticated = !clientAuth.enabled()`; before forwarding a request while not authenticated, call `check`: on rejection log WARN `Rejected client {addr}: {reason}[ (user '{name}')]`, call `sendChallenge`, and `break` (existing `finally` closes the socket); on success log DEBUG and set `authenticated = true`. Do not modify `RequestForwarder`. Update the class Javadoc to describe the gate. Verify with task 3.4.
+- [x] 3.3 In `server/ProxyServer`, add a `ClientAuthenticator clientAuthenticator` final field (constructor-injected) and pass it to `new ClientConnectionHandler(client, forwarder, clientAuthenticator)`. Verify `./gradlew compileJava` and existing tests pass.
+- [x] 3.4 Extend test-only `MockParentProxy` to record each received `Proxy-Authorization` value (accessor e.g. `proxyAuthorizations()`), then add `src/test/java/net/domax/jntlm/proxy/ClientAuthIntegrationTest` wiring the real stack like `ProxyForwardingIntegrationTest` but driving `ClientConnectionHandler`. Cover the spec scenarios: disabled → forwarded without credentials; missing/wrong credentials → 407 with `Proxy-Authenticate: Basic realm="jntlm"`, connection closed, `parent.connectionsAccepted() == 0`; `CONNECT` without credentials → 407 and no tunnel; valid credentials → 200 relayed and no recorded parent `Proxy-Authorization` starts with `Basic`; second keep-alive request without credentials on the same connection → 200; new connection without credentials → 407; authenticated `CONNECT` → tunnel echoes bytes. Verify `./gradlew test --tests '*ClientAuthIntegrationTest'` passes.
+- [x] 3.5 Add a log-capture assertion (Logback `ListAppender` on `ClientConnectionHandler`'s logger) for the "Failed attempt logging" scenario: WARN contains client address and `alice`, and contains neither the password nor the base64 header value. Verify the test passes.
+
+## 4. Documentation
+
+- [x] 4.1 Update `README.md`: replace "listens locally (unauthenticated)" phrasing to mention optional client auth; add `jntlm.client-auth.enabled`, `jntlm.client-auth.realm`, `jntlm.client-auth.users` rows to the Configuration table; add a short "Client authentication" subsection with a YAML example, how to generate a digest (`printf %s 'password' | shasum -a 256`), a `curl -x http://alice:pass@127.0.0.1:3128 ...` example, the connection-scoped behavior, and the clear-text caveat. Verify the rendered table columns align and examples match `application.yml`.
+- [x] 4.2 Update `AGENTS.md` "Big picture" (`server/` bullet) to mention `ClientAuthenticator` and the per-connection gate in `ClientConnectionHandler`. Verify the text matches the implementation.
+
+## 5. Integration checks
+
+- [x] 5.1 Run `./gradlew spotlessApply build` and verify it succeeds with all tests green and no Spotless violations.
+- [x] 5.2 Manual smoke (local profile): with client auth enabled, run the jar and verify `curl -x http://127.0.0.1:3128 http://example.com -I` returns 407, `curl -x http://alice:<pw>@127.0.0.1:3128 https://example.com -I` succeeds, and the startup INFO line appears; with it disabled, verify unauthenticated curl works as before.
+
+## Workflow follow-up
+
+- Archive the change with `/opsx-archive` after review, syncing `client-authentication` into `openspec/specs/`.

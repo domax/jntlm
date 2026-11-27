@@ -32,6 +32,7 @@ public class ProxyServer implements SmartLifecycle {
   private final JntlmProperties properties;
   private final RequestForwarder forwarder;
   private final ExecutorService clientExecutor;
+  private final ClientAuthenticator clientAuthenticator;
 
   private volatile boolean running;
   private ServerSocket serverSocket;
@@ -81,7 +82,7 @@ public class ProxyServer implements SmartLifecycle {
       try {
         socket.setTcpNoDelay(true);
         val client = new Endpoint(socket);
-        clientExecutor.execute(new ClientConnectionHandler(client, forwarder));
+        clientExecutor.execute(new ClientConnectionHandler(client, forwarder, clientAuthenticator));
         log.atDebug()
             .setMessage("Accepted client connection from {}")
             .addArgument(socket::getRemoteSocketAddress)
