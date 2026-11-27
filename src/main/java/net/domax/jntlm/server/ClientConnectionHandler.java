@@ -6,8 +6,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.http.HttpIo;
+import net.domax.jntlm.http.HttpProtocolException;
 import net.domax.jntlm.ntlm.NtlmCrypto;
 import net.domax.jntlm.proxy.Endpoint;
+import net.domax.jntlm.proxy.ErrorPages;
 import net.domax.jntlm.proxy.ForwardResult;
 import net.domax.jntlm.proxy.RequestForwarder;
 
@@ -25,6 +27,10 @@ import net.domax.jntlm.proxy.RequestForwarder;
  * otherwise a 407 challenge is sent and the connection is closed. Authentication is scoped to the
  * TCP connection, so later keep-alive requests (read here or inside {@link RequestForwarder}) are
  * not re-checked.
+ *
+ * <p>Also not in CNTLM: a malformed or oversized request is answered with {@code 400}/{@code 431}
+ * and {@code Connection: close} before anything is forwarded, and an unexpected exception is logged
+ * (class and message only) and closes the connection.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -34,13 +40,24 @@ public final class ClientConnectionHandler implements Runnable {
   private final RequestForwarder forwarder;
   private final ClientAuthenticator clientAuth;
 
+  /**
+   * Invoked exactly once when the connection is finished (e.g. to release a connection-limit
+   * permit).
+   */
+  private final Runnable onClose;
+
+  public ClientConnectionHandler(
+      Endpoint client, RequestForwarder forwarder, ClientAuthenticator clientAuth) {
+    this(client, forwarder, clientAuth, () -> {});
+  }
+
   @SuppressWarnings({"java:S135", "java:S3776"})
   @Override
   public void run() {
     var authenticated = !clientAuth.enabled();
     try {
       while (true) {
-        val request = HttpIo.recvHeaders(client.in());
+        val request = HttpIo.recvHeaders(client.in(), forwarder.limits());
         if (request == null) break;
 
         if (!authenticated) {
@@ -66,11 +83,28 @@ public final class ClientConnectionHandler implements Runnable {
         if (result.type() == ForwardResult.Type.CLOSE) break;
         // DONE: keep the client connection open for the next request (HTTP keep-alive).
       }
+    } catch (HttpProtocolException e) {
+      log.debug(
+          "Rejecting malformed request from {}: {}",
+          client.socket().getRemoteSocketAddress(),
+          e.getMessage());
+      try {
+        ErrorPages.send(client.out(), e.status(), e.getMessage(), null);
+      } catch (IOException ignored) {
+        // client is gone; nothing to do
+      }
     } catch (IOException e) {
       log.debug("Client connection ended: {}", e.getMessage());
+    } catch (RuntimeException e) {
+      log.warn(
+          "Client connection {} failed: {}: {}",
+          client.socket().getRemoteSocketAddress(),
+          e.getClass().getName(),
+          e.getMessage());
     } finally {
       client.close();
       NtlmCrypto.cleanup(); // Clean up thread-local crypto state to avoid memory leaks.
+      onClose.run();
     }
   }
 }

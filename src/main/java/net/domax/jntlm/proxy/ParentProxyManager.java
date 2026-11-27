@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import net.domax.jntlm.config.JntlmConfig;
 import net.domax.jntlm.config.JntlmProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -27,11 +28,13 @@ public class ParentProxyManager {
 
   private final List<ParentProxy> parents;
   private final ConnectionPool connectionPool;
+  private final int readTimeoutMs;
 
   private final AtomicInteger current = new AtomicInteger();
 
   public ParentProxyManager(JntlmProperties properties, ConnectionPool connectionPool) {
     this.connectionPool = connectionPool;
+    this.readTimeoutMs = JntlmConfig.toSoTimeout(properties.getLimits().getParentReadTimeout());
     parents =
         properties.getParents().stream()
             .filter(StringUtils::hasText)
@@ -58,6 +61,8 @@ public class ParentProxyManager {
         val socket = new Socket();
         socket.connect(new InetSocketAddress(p.host(), p.port()), CONNECT_TIMEOUT_MS);
         socket.setTcpNoDelay(true);
+        // Not in CNTLM: bound how long a silent parent can hold a request (jntlm.limits).
+        socket.setSoTimeout(readTimeoutMs);
         if (idx != start) {
           log.info("Switched to parent proxy {}", p);
           onParentSwitched(idx);

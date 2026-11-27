@@ -2,12 +2,17 @@
 package net.domax.jntlm.proxy;
 
 import java.io.IOException;
-import lombok.RequiredArgsConstructor;
+import java.net.SocketTimeoutException;
+import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import net.domax.jntlm.config.JntlmProperties;
 import net.domax.jntlm.http.HttpIo;
+import net.domax.jntlm.http.HttpLimits;
 import net.domax.jntlm.http.HttpMessage;
+import net.domax.jntlm.http.HttpProtocolException;
 import net.domax.jntlm.ntlm.Credentials;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,9 +28,14 @@ import org.springframework.stereotype.Component;
  * <p>The intricate two-pass ({@code loop 0} = client&rarr;parent, {@code loop 1} =
  * parent&rarr;client) control flow with CNTLM's {@code goto shortcut}/{@code goto beginning}/{@code
  * goto bailout} jumps is reproduced with labeled loops and a {@code shortcut} flag.
+ *
+ * <p>Not in CNTLM: framing errors and timeouts are answered with an error page (400/431 for a bad
+ * client request, 502 for a bad parent response or failed parent authentication, 504 for a parent
+ * read timeout) as long as nothing of the current response was sent yet; a parent connection is
+ * pooled only after a cleanly framed exchange, and any unexpected exception closes (never pools)
+ * the parent connection.
  */
 @Slf4j
-@RequiredArgsConstructor
 @Component
 public class RequestForwarder {
 
@@ -37,12 +47,73 @@ public class RequestForwarder {
   private static final String PROXY_AUTHORIZATION = "Proxy-Authorization";
   private static final String CONNECTION = "Connection";
   private static final String KEEP_ALIVE = "keep-alive";
+  private static final String CLOSE = "close";
 
   private final ParentProxyManager parentProxyManager;
   private final ConnectionPool connectionPool;
   private final ProxyAuthenticator authenticator;
   private final Credentials globalCredentials;
   private final NtlmFlagsResolver flagsResolver;
+  private final HttpLimits limits;
+  private final Duration tunnelIdleTimeout;
+
+  /** Creates a forwarder using {@link HttpLimits#DEFAULT} and no tunnel idle timeout. */
+  public RequestForwarder(
+      ParentProxyManager parentProxyManager,
+      ConnectionPool connectionPool,
+      ProxyAuthenticator authenticator,
+      Credentials globalCredentials,
+      NtlmFlagsResolver flagsResolver) {
+    this(
+        parentProxyManager,
+        connectionPool,
+        authenticator,
+        globalCredentials,
+        flagsResolver,
+        HttpLimits.DEFAULT,
+        Duration.ZERO);
+  }
+
+  @Autowired
+  public RequestForwarder(
+      ParentProxyManager parentProxyManager,
+      ConnectionPool connectionPool,
+      ProxyAuthenticator authenticator,
+      Credentials globalCredentials,
+      NtlmFlagsResolver flagsResolver,
+      HttpLimits limits,
+      JntlmProperties properties) {
+    this(
+        parentProxyManager,
+        connectionPool,
+        authenticator,
+        globalCredentials,
+        flagsResolver,
+        limits,
+        properties.getLimits().getTunnelIdleTimeout());
+  }
+
+  public RequestForwarder(
+      ParentProxyManager parentProxyManager,
+      ConnectionPool connectionPool,
+      ProxyAuthenticator authenticator,
+      Credentials globalCredentials,
+      NtlmFlagsResolver flagsResolver,
+      HttpLimits limits,
+      Duration tunnelIdleTimeout) {
+    this.parentProxyManager = parentProxyManager;
+    this.connectionPool = connectionPool;
+    this.authenticator = authenticator;
+    this.globalCredentials = globalCredentials;
+    this.flagsResolver = flagsResolver;
+    this.limits = limits;
+    this.tunnelIdleTimeout = tunnelIdleTimeout;
+  }
+
+  /** Header-read limits applied to client requests and parent responses. */
+  public HttpLimits limits() {
+    return limits;
+  }
 
   /**
    * Forwards {@code initialRequest} (already read from {@code client}) and relays the response.
@@ -51,8 +122,21 @@ public class RequestForwarder {
    * @param initialRequest the request already parsed from the client
    * @return a {@link ForwardResult} describing what the caller should do next
    */
-  @SuppressWarnings({"java:S3776", "java:S135", "LabeledStatement"})
+  @SuppressWarnings("java:S1181")
   public ForwardResult forward(Endpoint client, HttpMessage initialRequest) {
+    val active = new Endpoint[1];
+    try {
+      return forward(client, initialRequest, active);
+    } catch (RuntimeException | Error e) {
+      // Not in CNTLM: an unexpected failure must never leave a half-used parent connection open
+      // (or pooled).
+      if (active[0] != null) active[0].close();
+      throw e;
+    }
+  }
+
+  @SuppressWarnings({"java:S3776", "java:S135", "java:S6541", "LabeledStatement"})
+  private ForwardResult forward(Endpoint client, HttpMessage initialRequest, Endpoint[] active) {
     var request = initialRequest;
     var retry = false;
     String hostname = null;
@@ -84,6 +168,7 @@ public class RequestForwarder {
           return ForwardResult.close();
         }
       }
+      active[0] = server;
 
       if (hostname == null && request != null && request.getHost() != null)
         hostname = request.getHost();
@@ -99,7 +184,12 @@ public class RequestForwarder {
           request = null;
         } else {
           try {
-            data0 = HttpIo.recvHeaders(client.in());
+            data0 = HttpIo.recvHeaders(client.in(), limits);
+          } catch (HttpProtocolException e) {
+            // Not in CNTLM: reject a malformed keep-alive request instead of forwarding it.
+            log.debug("Rejecting malformed client request: {}", e.getMessage());
+            trySendError(client, e.status(), e.getMessage(), null);
+            data0 = null;
           } catch (IOException e) {
             data0 = null;
           }
@@ -119,7 +209,18 @@ public class RequestForwarder {
           if (!shortcut) {
             if (loop == 1) {
               try {
-                data1 = HttpIo.recvHeaders(server.in());
+                data1 = HttpIo.recvHeaders(server.in(), limits);
+              } catch (HttpProtocolException e) {
+                // Not in CNTLM: nothing of this response reached the client yet.
+                log.warn("Malformed parent proxy response: {}", e.getMessage());
+                trySendError(client, 502, "Malformed response from parent proxy.", data0);
+                discard(server, creds);
+                return ForwardResult.close();
+              } catch (SocketTimeoutException e) {
+                log.warn("Parent proxy response timed out");
+                trySendError(client, 504, "Parent proxy response timed out.", data0);
+                discard(server, creds);
+                return ForwardResult.close();
               } catch (IOException e) {
                 data1 = null;
               }
@@ -168,10 +269,13 @@ public class RequestForwarder {
                 ar.ok(),
                 ar.reply() == null ? null : ar.reply().getCode());
             if (!ar.ok()) {
+              // Not in CNTLM: tell the client why instead of silently closing.
+              trySendError(client, ar.status(), "Parent proxy authentication failed.", data0);
               discard(server, creds);
               return ForwardResult.close();
             }
             server = ar.server();
+            active[0] = server;
             data1 = ar.reply();
             if (data1 != null && data1.getCode() != 407) {
               // Parent accepted (or errored) without a challenge: skip straight to
@@ -202,11 +306,19 @@ public class RequestForwarder {
           if (loop == 1 && data1.getCode() == 407 && !wasCached && !noauth && !authok)
             flagsResolver.reportRejected(creds.getFlags());
 
+          // Not in CNTLM: only a cleanly framed exchange may keep either connection alive.
+          var reusable = true;
+          if (loop == 1)
+            reusable =
+                HttpIo.isCleanlyFramed(data0, data1)
+                    && !data0.getHeaders().containsToken(CONNECTION, CLOSE)
+                    && !data1.getHeaders().containsToken(CONNECTION, CLOSE);
+
           // --- loop 1: normalize hop-by-hop headers for the client ---
           if (loop == 1) {
-            connAlive = data1.getHeaders().containsToken(CONNECTION, KEEP_ALIVE);
+            connAlive = reusable && data1.getHeaders().containsToken(CONNECTION, KEEP_ALIVE);
             if (!connAlive && !(data0.isConnect() && data1.getCode() == 200))
-              data1.getHeaders().modify(CONNECTION, "close");
+              data1.getHeaders().modify(CONNECTION, CLOSE);
             data1.getHeaders().remove(PROXY_AUTHENTICATE);
             if (data1.getCode() == 407) data1.getHeaders().modify(PROXY_AUTHENTICATE, BASIC_REALM);
           }
@@ -245,7 +357,8 @@ public class RequestForwarder {
                   client.socket(),
                   server.in(),
                   server.out(),
-                  server.socket());
+                  server.socket(),
+                  tunnelIdleTimeout);
             } catch (Exception ignored) {
               // tunnel closes both ends; nothing more to relay
             }
@@ -257,7 +370,7 @@ public class RequestForwarder {
           val rIn = (loop == 0) ? client.in() : server.in();
           val bodyResponse = (loop == 0) ? null : data1;
           try {
-            HttpIo.sendBody(wOut, rIn, data0, bodyResponse);
+            HttpIo.sendBody(wOut, rIn, data0, bodyResponse, limits);
           } catch (IOException e) {
             discard(server, creds);
             return ForwardResult.close();
@@ -266,7 +379,8 @@ public class RequestForwarder {
           // --- loop 1: decide whether the parent connection stays alive ---
           if (loop == 1) {
             proxyAlive =
-                data1.getHeaders().containsToken(PROXY_CONNECTION, KEEP_ALIVE)
+                reusable
+                    && data1.getHeaders().containsToken(PROXY_CONNECTION, KEEP_ALIVE)
                     && data0.getHttpVersion() >= 11;
             if (!proxyAlive) pendingResult = ForwardResult.close();
           }
@@ -297,6 +411,14 @@ public class RequestForwarder {
   private void trySend502(Endpoint client, HttpMessage request) {
     try {
       ErrorPages.send502(client.out(), request == null ? null : request.getProtocol());
+    } catch (IOException ignored) {
+      // client is gone; nothing to do
+    }
+  }
+
+  private void trySendError(Endpoint client, int status, String detail, HttpMessage request) {
+    try {
+      ErrorPages.send(client.out(), status, detail, request == null ? null : request.getProtocol());
     } catch (IOException ignored) {
       // client is gone; nothing to do
     }

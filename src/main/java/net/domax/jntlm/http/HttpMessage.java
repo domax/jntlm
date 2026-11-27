@@ -1,7 +1,9 @@
 /* JNTLM © Licensed under MIT 2026. */
 package net.domax.jntlm.http;
 
+import lombok.AccessLevel;
 import lombok.Data;
+import lombok.Setter;
 import lombok.val;
 
 /**
@@ -29,7 +31,15 @@ public final class HttpMessage {
   private String protocol = "HTTP/1.1";
   private int httpVersion = 11;
 
-  private final HttpHeaders headers = new HttpHeaders();
+  @Setter(AccessLevel.NONE)
+  private HttpHeaders headers = new HttpHeaders();
+
+  /**
+   * Not in CNTLM: {@code false} when the message's framing was ambiguous or close-delimited (e.g. a
+   * response carrying both {@code Transfer-Encoding} and {@code Content-Length}), so the parent
+   * connection it arrived on must not be pooled.
+   */
+  private boolean reusable = true;
 
   // Parsed connection target (for absolute request URLs / CONNECT authority)
   private String host;
@@ -108,7 +118,8 @@ public final class HttpMessage {
     m.httpVersion = this.httpVersion;
     m.host = this.host;
     m.port = this.port;
-    for (val h : this.headers.all()) m.headers.add(h.name(), h.value());
+    m.reusable = this.reusable;
+    m.headers = this.headers.copy();
     return m;
   }
 

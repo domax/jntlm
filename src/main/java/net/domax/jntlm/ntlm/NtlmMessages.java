@@ -21,10 +21,11 @@ import lombok.val;
  */
 public final class NtlmMessages {
 
-  /** Minimum Type-2 challenge length for which a target-info block is parsed. */
-  private static final int NTLM_CHALLENGE_MIN = 40;
+  /** Minimum valid Type-2 challenge length (signature, type, target name, flags, challenge). */
+  private static final int NTLM_CHALLENGE_MIN = 32;
 
-  private static final int NTLM_BUFSIZE = 1024;
+  /** Minimum Type-2 length that declares a target-information block. */
+  private static final int NTLM_TARGET_INFO_MIN = 48;
 
   /** Offset between the Unix epoch and the Windows FILETIME epoch (1601), in seconds. */
   private static final long FILETIME_EPOCH_OFFSET = 11644473600L;
@@ -74,16 +75,29 @@ public final class NtlmMessages {
    *
    * @param challenge the raw bytes of the parent proxy's Type-2 challenge message
    * @param creds the credentials (dialect switches + password hashes)
+   * @throws NtlmException if the challenge is invalid or a Type-3 field exceeds 65535 bytes
+   */
+  public static byte[] type3Response(byte[] challenge, Credentials creds) {
+    val nonce = new byte[8];
+    RANDOM.nextBytes(nonce);
+    return type3Response(challenge, creds, nonce, System.currentTimeMillis());
+  }
+
+  /**
+   * Same as {@link #type3Response(byte[], Credentials)} with a fixed 8-byte client nonce and
+   * timestamp (Unix milliseconds), for deterministic tests.
    */
   @SuppressWarnings({"java:S3776", "java:S135"})
-  public static byte[] type3Response(byte[] challenge, Credentials creds) {
+  static byte[] type3Response(byte[] challenge, Credentials creds, byte[] nonce, long unixMillis) {
+    validateChallenge(challenge);
     int chalLen = challenge.length;
 
-    // Parse the target-information block (used by NTLMv2).
+    // Parse the target-information block (used by NTLMv2). Not in CNTLM: the block is read only
+    // when the message is long enough to declare it and the declared block lies inside the message.
     int tbOfs = 0;
     int tbLen = 0;
     int lastType = -1;
-    if (chalLen >= NTLM_CHALLENGE_MIN) {
+    if (chalLen >= NTLM_TARGET_INFO_MIN && targetInfoInBounds(challenge)) {
       int tPos = Le.readU16(challenge, 44);
       tbOfs = tPos;
       while (tPos + 4 <= chalLen) {
@@ -106,12 +120,12 @@ public final class NtlmMessages {
     byte[] lmHash = null;
 
     if (creds.getHashNtlm2() != 0) {
-      val r = ntlm2CalcResp(creds.getPassNtlm2(), challenge, tbOfs, tbLen);
+      val r = ntlm2CalcResp(creds.getPassNtlm2(), challenge, tbOfs, tbLen, nonce, unixMillis);
       ntHash = r[0];
       lmHash = r[1];
     }
     if (creds.getHashNt() == 2) {
-      val r = ntlm2srCalcResp(creds.getPassNt(), challenge);
+      val r = ntlm2srCalcResp(creds.getPassNt(), challenge, nonce);
       ntHash = r[0];
       lmHash = r[1];
     }
@@ -140,8 +154,16 @@ public final class NtlmMessages {
     int dLen = uDomain.length;
     int uLen = uUser.length;
     int hLen = uHost.length;
+    checkField("domain", dLen);
+    checkField("user", uLen);
+    checkField("workstation", hLen);
+    checkField("LM response", lmLen);
+    checkField("NT response", ntLen);
 
-    val buf = new byte[NTLM_BUFSIZE];
+    // Not in CNTLM: sized to the content instead of a fixed NTLM_BUFSIZE (1024) buffer. Room is
+    // kept for CNTLM's quirk of writing the NT response 24 bytes after the identity fields.
+    int identity = 64 + dLen + uLen + hLen;
+    val buf = new byte[identity + Math.max(lmLen, ntHash == null ? 0 : 24 + ntLen)];
     arraycopy(SIGNATURE, 0, buf, 0, SIGNATURE.length);
     Le.u32(buf, 8, 3);
 
@@ -186,8 +208,34 @@ public final class NtlmMessages {
     // Faithful to CNTLM: NT response is placed 24 bytes after the identity fields.
     if (ntHash != null) arraycopy(ntHash, 0, buf, p + dLen + uLen + hLen + 24, ntLen);
 
-    int total = 64 + dLen + uLen + hLen + lmLen + ntLen;
-    return Arrays.copyOf(buf, total);
+    int total = identity + lmLen + ntLen;
+    return total == buf.length ? buf : Arrays.copyOf(buf, total);
+  }
+
+  /**
+   * Requires a Type-2 message of at least 32 bytes with the {@code NTLMSSP\0} signature and type 2.
+   * Not in CNTLM.
+   *
+   * @throws NtlmException if the challenge is invalid
+   */
+  private static void validateChallenge(byte[] challenge) {
+    if (challenge == null || challenge.length < NTLM_CHALLENGE_MIN)
+      throw new NtlmException("NTLM challenge too short");
+    if (!Arrays.equals(challenge, 0, SIGNATURE.length, SIGNATURE, 0, SIGNATURE.length))
+      throw new NtlmException("NTLM challenge has no NTLMSSP signature");
+    if (Le.readU16(challenge, 8) != 2 || Le.readU16(challenge, 10) != 0)
+      throw new NtlmException("NTLM challenge is not a Type-2 message");
+  }
+
+  /** Whether the declared target-info security buffer (length @40, offset @44) is in bounds. */
+  private static boolean targetInfoInBounds(byte[] challenge) {
+    long len = Le.readU16(challenge, 40);
+    long ofs = Le.readU16(challenge, 44) | ((long) Le.readU16(challenge, 46) << 16);
+    return ofs + len <= challenge.length;
+  }
+
+  private static void checkField(String name, int len) {
+    if (len > 0xFFFF) throw new NtlmException("NTLM Type-3 " + name + " exceeds 65535 bytes");
   }
 
   /** Extracts the 8-byte server challenge (bytes 24..32) from a Type-2 message. */
@@ -213,10 +261,9 @@ public final class NtlmMessages {
    * Computes the NTLMv2 response. Returns {@code [ntResponse, lmResponse]}. Ports {@code
    * ntlm2_calc_resp}.
    */
-  private static byte[][] ntlm2CalcResp(byte[] passNtlm2, byte[] challenge, int tbOfs, int tbLen) {
-    val nonce = new byte[8];
-    RANDOM.nextBytes(nonce);
-    val timestamp = (System.currentTimeMillis() / 1000L + FILETIME_EPOCH_OFFSET) * 10000000L;
+  private static byte[][] ntlm2CalcResp(
+      byte[] passNtlm2, byte[] challenge, int tbOfs, int tbLen, byte[] nonce, long unixMillis) {
+    val timestamp = (unixMillis / 1000L + FILETIME_EPOCH_OFFSET) * 10000000L;
 
     val bLen = 28 + tbLen + 4;
     val blob = new byte[bLen];
@@ -254,9 +301,7 @@ public final class NtlmMessages {
    * Computes the NTLM2 session response (NTLM2SR). Returns {@code [ntResponse, lmResponse]}. Ports
    * {@code ntlm2sr_calc_rest}.
    */
-  private static byte[][] ntlm2srCalcResp(byte[] passNt, byte[] challenge) {
-    val nonce = new byte[8];
-    RANDOM.nextBytes(nonce);
+  private static byte[][] ntlm2srCalcResp(byte[] passNt, byte[] challenge, byte[] nonce) {
 
     val lmResp = new byte[24];
     arraycopy(nonce, 0, lmResp, 0, 8);

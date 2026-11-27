@@ -6,12 +6,14 @@ import static java.util.function.Predicate.not;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import net.domax.jntlm.http.HttpLimits;
 import net.domax.jntlm.ntlm.Credentials;
 import net.domax.jntlm.ntlm.NtlmHashes;
 import net.domax.jntlm.server.ClientAuthenticator;
@@ -49,6 +51,43 @@ public class JntlmConfig {
           auth.userCount(),
           auth.realm());
     return auth;
+  }
+
+  /**
+   * Validates {@code jntlm.limits.*} (failing startup with the offending property name) and exposes
+   * the header limits used by the HTTP parser. Not in CNTLM.
+   */
+  @Bean
+  public HttpLimits httpLimits(JntlmProperties properties) {
+    val l = properties.getLimits();
+    int maxHeaderBytes = Math.toIntExact(l.getMaxHeaderSize().toBytes());
+    if (maxHeaderBytes <= 0)
+      throw invalid("max-header-size", "must be positive", l.getMaxHeaderSize());
+    if (l.getMaxHeaderCount() <= 0)
+      throw invalid("max-header-count", "must be positive", l.getMaxHeaderCount());
+    checkDuration("client-idle-timeout", l.getClientIdleTimeout());
+    checkDuration("parent-read-timeout", l.getParentReadTimeout());
+    checkDuration("tunnel-idle-timeout", l.getTunnelIdleTimeout());
+    if (l.getMaxClientConnections() < 0)
+      throw invalid("max-client-connections", "must not be negative", l.getMaxClientConnections());
+    return new HttpLimits(maxHeaderBytes, l.getMaxHeaderCount());
+  }
+
+  private static void checkDuration(String name, Duration d) {
+    if (d == null || d.isNegative()) throw invalid(name, "must not be negative", d);
+  }
+
+  private static IllegalStateException invalid(String name, String why, Object value) {
+    return new IllegalStateException("jntlm.limits." + name + " " + why + " (was " + value + ")");
+  }
+
+  /**
+   * Converts a timeout to a socket {@code SO_TIMEOUT} value in milliseconds ({@code 0} = infinite),
+   * clamped to {@code int}.
+   */
+  public static int toSoTimeout(Duration d) {
+    if (d == null || d.isZero() || d.isNegative()) return 0;
+    return Math.clamp(d.toMillis(), 1, Integer.MAX_VALUE);
   }
 
   /** Creates the global NTLM credentials from the configured properties. */

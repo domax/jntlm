@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link HttpHeaders#copy()} deep-copy semantics. */
+/** Tests for {@link HttpHeaders} ordering, token matching and deep-copy semantics. */
 class HttpHeadersTest {
 
   @Test
@@ -72,5 +72,53 @@ class HttpHeadersTest {
   @Test
   void copyOfEmptyIsEmpty() {
     assertTrue(new HttpHeaders().copy().isEmpty());
+  }
+
+  @Test
+  void repeatedIdenticalValuesArePreserved() {
+    HttpHeaders h = new HttpHeaders();
+    h.add("Set-Cookie", "a=1");
+    h.add("Set-Cookie", "a=1");
+
+    assertEquals(List.of("a=1", "a=1"), h.getAll("set-cookie"));
+    StringBuilder sb = new StringBuilder();
+    h.appendTo(sb);
+    assertEquals("Set-Cookie: a=1\r\nSet-Cookie: a=1\r\n", sb.toString());
+  }
+
+  @Test
+  void interleavedOrderIsPreserved() {
+    HttpHeaders h = new HttpHeaders();
+    h.add("A", "1");
+    h.add("B", "2");
+    h.add("A", "3");
+
+    StringBuilder sb = new StringBuilder();
+    h.appendTo(sb);
+    assertEquals("A: 1\r\nB: 2\r\nA: 3\r\n", sb.toString());
+  }
+
+  @Test
+  void modifyKeepsFirstPositionAndDropsLaterDuplicates() {
+    HttpHeaders h = new HttpHeaders();
+    h.add("A", "1");
+    h.add("B", "2");
+    h.add("a", "3");
+
+    h.modify("A", "x");
+
+    assertEquals(
+        List.of(new HttpHeaders.Header("A", "x"), new HttpHeaders.Header("B", "2")), h.all());
+  }
+
+  @Test
+  void containsTokenMatchesWholeElementsOnly() {
+    HttpHeaders h = new HttpHeaders();
+    h.add("Connection", "keep-alive, Close");
+    assertTrue(h.containsToken("Connection", "close"));
+
+    HttpHeaders n = new HttpHeaders();
+    n.add("Connection", "notclose");
+    assertFalse(n.containsToken("Connection", "close"));
   }
 }

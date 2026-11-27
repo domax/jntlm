@@ -2,14 +2,17 @@
 package net.domax.jntlm.proxy;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.Base64;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import net.domax.jntlm.http.HttpIo;
+import net.domax.jntlm.http.HttpLimits;
 import net.domax.jntlm.http.HttpMessage;
 import net.domax.jntlm.ntlm.Credentials;
+import net.domax.jntlm.ntlm.NtlmException;
 import net.domax.jntlm.ntlm.NtlmMessages;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,29 +33,47 @@ import org.springframework.stereotype.Component;
  * The caller ({@link RequestForwarder}) then sends the now-authorized {@code request}.
  */
 @Slf4j
-@RequiredArgsConstructor
 @Component
 public class ProxyAuthenticator {
 
-  private static final int NTLM_CHALLENGE_MIN = 40;
   private static final byte[] NO_CHALLENGE = new byte[0];
 
   private final ParentProxyManager parentProxyManager;
+  private final HttpLimits limits;
+
+  /** Creates an authenticator using {@link HttpLimits#DEFAULT}. */
+  public ProxyAuthenticator(ParentProxyManager parentProxyManager) {
+    this(parentProxyManager, HttpLimits.DEFAULT);
+  }
+
+  @Autowired
+  public ProxyAuthenticator(ParentProxyManager parentProxyManager, HttpLimits limits) {
+    this.parentProxyManager = parentProxyManager;
+    this.limits = limits;
+  }
 
   /**
    * Result of an authentication attempt.
    *
-   * @param ok {@code true} if the proxy replied (network OK); {@code false} on I/O failure
+   * @param ok {@code true} if the proxy replied (network OK); {@code false} on failure
    * @param server the (possibly reconnected) parent-proxy endpoint
    * @param reply the proxy's reply to the probe (its code drives the caller's next step)
+   * @param status on failure, the status to answer the client with ({@code 502}, or {@code 504} on
+   *     a parent read timeout); {@code 0} on success. Not in CNTLM.
    */
-  public record AuthResult(boolean ok, Endpoint server, HttpMessage reply) {}
+  public record AuthResult(boolean ok, Endpoint server, HttpMessage reply, int status) {
+
+    static AuthResult failed(Endpoint server, IOException cause) {
+      return new AuthResult(
+          false, server, null, cause instanceof SocketTimeoutException ? 504 : 502);
+    }
+  }
 
   /**
    * Runs the handshake on {@code server}. On success, if the proxy required authentication, {@code
    * request} is mutated to carry the final NTLM {@code Proxy-Authorization} header.
    */
-  @SuppressWarnings("java:S3776") // Cognitive Complexity
+  @SuppressWarnings({"java:S3776", "java:S1141"})
   public AuthResult authenticate(Endpoint server, HttpMessage request, Credentials creds) {
     // Type-1 (negotiate) message.
     val type1 = NtlmMessages.type1Request(creds);
@@ -72,47 +93,50 @@ public class ProxyAuthenticator {
       HttpIo.sendHeaders(server.out(), probe);
     } catch (IOException e) {
       server.close();
-      return new AuthResult(false, server, null);
+      return AuthResult.failed(server, e);
     }
 
     final HttpMessage reply;
     try {
-      reply = HttpIo.recvHeaders(server.in());
+      reply = HttpIo.recvHeaders(server.in(), limits);
     } catch (IOException e) {
+      log.debug("Parent proxy auth reply unreadable: {}", e.toString());
       server.close();
-      return new AuthResult(false, server, null);
+      return AuthResult.failed(server, e);
     }
     if (reply == null) {
       server.close();
-      return new AuthResult(false, server, null);
+      return AuthResult.failed(server, null);
     }
 
     try {
       if (reply.getCode() == 407) {
         // Consume the challenge body so the connection can be reused.
-        HttpIo.dropBody(server.in(), reply);
+        HttpIo.dropBody(server.in(), reply, limits);
 
         val challengeHeader = reply.getHeaders().getFirst("Proxy-Authenticate");
         if (challengeHeader != null) {
           val challenge = decodeChallenge(challengeHeader);
-          if (challenge.length > NTLM_CHALLENGE_MIN) {
-            val type3 = NtlmMessages.type3Response(challenge, creds);
-            val type3Header = "NTLM " + Base64.getEncoder().encodeToString(type3);
-            request.getHeaders().modify("Proxy-Authorization", type3Header);
-          } else {
-            log.error("Proxy returned an invalid NTLM challenge");
+          final byte[] type3;
+          try {
+            type3 = NtlmMessages.type3Response(challenge, creds);
+          } catch (NtlmException e) {
+            // Not in CNTLM: Type-2 validation replaces its "length > 40" check (see NtlmMessages).
+            log.error("Proxy returned an invalid NTLM challenge: {}", e.getMessage());
             server.close();
-            return new AuthResult(false, server, null);
+            return AuthResult.failed(server, null);
           }
+          val type3Header = "NTLM " + Base64.getEncoder().encodeToString(type3);
+          request.getHeaders().modify("Proxy-Authorization", type3Header);
         } else log.warn("No Proxy-Authenticate header - NTLM/Negotiate not supported?");
       } else if (pretend407) {
         // No auth was demanded, but we only sent a probe - force the caller to re-issue.
         reply.setCode(407);
-        HttpIo.dropBody(server.in(), reply);
+        HttpIo.dropBody(server.in(), reply, limits);
       }
     } catch (IOException e) {
       server.close();
-      return new AuthResult(false, server, null);
+      return AuthResult.failed(server, e);
     }
 
     // If the proxy closed the connection on us, reconnect for the caller.
@@ -123,11 +147,11 @@ public class ProxyAuthenticator {
       try {
         activeServer = new Endpoint(parentProxyManager.connect());
       } catch (IOException e) {
-        return new AuthResult(false, server, null);
+        return AuthResult.failed(server, e);
       }
     }
 
-    return new AuthResult(true, activeServer, reply);
+    return new AuthResult(true, activeServer, reply, 0);
   }
 
   /** Decodes the base64 NTLM Type-2 challenge from a {@code Proxy-Authenticate} header value. */

@@ -2,11 +2,13 @@
 package net.domax.jntlm.config;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
 import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.util.unit.DataSize;
 
 /**
  * Typed configuration for jntlm, bound from the {@code jntlm.*} properties.
@@ -47,6 +49,36 @@ public class JntlmProperties {
 
   /** Optional BASIC authentication of incoming clients, bound from {@code jntlm.client-auth.*}. */
   private ClientAuth clientAuth = new ClientAuth();
+
+  /** Header-size limits, timeouts and connection cap, bound from {@code jntlm.limits.*}. */
+  private Limits limits = new Limits();
+
+  /**
+   * Resource limits protecting the proxy from oversized messages, stalled peers and connection
+   * floods. Not in CNTLM. A zero duration or connection count disables that limit; header limits
+   * must be positive.
+   */
+  @Data
+  public static class Limits {
+
+    /** Maximum size of a request or response header section (incl. line terminators). */
+    private DataSize maxHeaderSize = DataSize.ofKilobytes(128);
+
+    /** Maximum number of header lines in a request or response (and chunked trailers). */
+    private int maxHeaderCount = 256;
+
+    /** Read timeout on client connections (waiting for a request or its body); 0 = none. */
+    private Duration clientIdleTimeout = Duration.ofSeconds(300);
+
+    /** Read timeout on parent connections (waiting for response headers or body); 0 = none. */
+    private Duration parentReadTimeout = Duration.ofSeconds(600);
+
+    /** Idle timeout of a CONNECT tunnel (no bytes in either direction); 0 = none. */
+    private Duration tunnelIdleTimeout = Duration.ZERO;
+
+    /** Maximum concurrent client connections; extra ones get {@code 503}. 0 = unlimited. */
+    private int maxClientConnections = 1024;
+  }
 
   /**
    * Optional HTTP BASIC proxy authentication required from clients connecting to the jntlm

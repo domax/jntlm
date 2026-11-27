@@ -149,19 +149,25 @@ stopping the process:
 
 Configured via `jntlm.*` properties (see `application.yml` for the annotated defaults):
 
-| Property                    | Purpose                                                                                             |
-|-----------------------------|-----------------------------------------------------------------------------------------------------|
-| `jntlm.listen-address`      | Local bind address (default `127.0.0.1`, loopback only).                                            |
-| `jntlm.listen-port`         | Local listener port (default `3128`).                                                               |
-| `jntlm.auth`                | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.                                    |
-| `jntlm.flags`               | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
-| `jntlm.detect.enabled`      | Auto-detect working negotiate flags (default `true`; see below).                                    |
-| `jntlm.detect.probe-url`    | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).                               |
-| `jntlm.parents`             | Ordered `host:port` parent proxies with round-robin failover.                                       |
-| `jntlm.credentials.*`       | `username`, `domain`, `workstation`, and password/hashes.                                           |
-| `jntlm.client-auth.enabled` | Require BASIC proxy auth from clients (default `false`; see below).                                 |
-| `jntlm.client-auth.realm`   | Realm in the `Proxy-Authenticate` challenge (default `jntlm`).                                      |
-| `jntlm.client-auth.users`   | Accepted clients: `username` + `password` (plaintext or `{sha256}<hex>`).                           |
+| Property                              | Purpose                                                                                             |
+|---------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `jntlm.listen-address`                | Local bind address (default `127.0.0.1`, loopback only).                                            |
+| `jntlm.listen-port`                   | Local listener port (default `3128`).                                                               |
+| `jntlm.auth`                          | NTLM dialect: `NTLMV2` (default), `NTLM2SR`, `NT`, `NTLM`, `LM`.                                    |
+| `jntlm.flags`                         | Optional NTLM negotiate flags (hex/decimal; `0` = dialect default). With detection on, tried first. |
+| `jntlm.detect.enabled`                | Auto-detect working negotiate flags (default `true`; see below).                                    |
+| `jntlm.detect.probe-url`              | Optional URL probed at startup (`http` → `GET`, `https` → `CONNECT`).                               |
+| `jntlm.parents`                       | Ordered `host:port` parent proxies with round-robin failover.                                       |
+| `jntlm.credentials.*`                 | `username`, `domain`, `workstation`, and password/hashes.                                           |
+| `jntlm.client-auth.enabled`           | Require BASIC proxy auth from clients (default `false`; see below).                                 |
+| `jntlm.client-auth.realm`             | Realm in the `Proxy-Authenticate` challenge (default `jntlm`).                                      |
+| `jntlm.client-auth.users`             | Accepted clients: `username` + `password` (plaintext or `{sha256}<hex>`).                           |
+| `jntlm.limits.max-header-bytes`       | Max header section bytes per message (default `131072`); over → 431 (client) / 502 (parent).        |
+| `jntlm.limits.max-header-count`       | Max header lines per message (default `256`); over → 431 (client) / 502 (parent).                   |
+| `jntlm.limits.client-idle-timeout`    | Close an idle client connection after this long (default `300s`; `0` = never).                      |
+| `jntlm.limits.parent-read-timeout`    | Parent silent this long → 504, or abort a body (default `600s`; `0` = never).                       |
+| `jntlm.limits.tunnel-idle-timeout`    | Close a `CONNECT` tunnel idle in both directions (default `0` = never).                             |
+| `jntlm.limits.max-client-connections` | Max concurrent client connections; extra ones get 503 (default `1024`; `0` = unlimited).            |
 
 Credentials: supply **either** a plaintext `password` (hashes derived at startup in `JntlmConfig`)
 **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
@@ -200,6 +206,24 @@ curl -x http://alice:secret@127.0.0.1:3128 https://example.com
 > Caveat: BASIC sends credentials base64-encoded in **clear text**, and `{sha256}` digests are
 > unsalted. This deters casual use on trusted networks; it is not a substitute for network-level
 > protection.
+
+### Hardening
+
+Not in CNTLM — jntlm is stricter than its parser so that message boundaries are never ambiguous:
+
+- Malformed client requests (e.g. `Header : value`, obs-fold, conflicting `Content-Length`,
+  `Transfer-Encoding` + `Content-Length`, bad chunk sizes, missing `Host`) get `400 Bad Request` and
+  the connection is closed; nothing reaches the parent.
+- Oversized request headers get `431`; malformed or oversized parent responses get `502 Bad
+  Gateway`; a parent silent for `parent-read-timeout` gets `504 Gateway Timeout`; an invalid NTLM
+  challenge gets `502`. Over `max-client-connections`, new clients get `503` without contacting a
+  parent.
+- A parent connection is returned to the pool only after a cleanly framed exchange (explicit
+  `Content-Length` or chunked, no `Connection: close`).
+- At startup, a WARN is logged when the listener is reachable from other hosts (non-loopback
+  `listen-address`) while client authentication is disabled.
+- Each timeout is disabled with `0` (e.g. `jntlm.limits.client-idle-timeout: 0`), and
+  `max-client-connections: 0` removes the connection cap.
 
 ### Flag auto-detection
 
@@ -264,6 +288,8 @@ separate `local` profile — `application-local.yml`, excluded from the jar — 
   `application-local.yml`).
 - Credentials: supply either a plaintext `password` (hashes derived at startup in `JntlmConfig`)
   **or** pre-computed hex hashes (`pass-lm` / `pass-nt` / `pass-ntlm2`) — not both.
+- A previously tolerated but invalid message now fails with `400`/`502` (see "Hardening"); slow
+  transfers may hit `jntlm.limits.*` timeouts, which can be raised or set to `0`.
 
 ## License
 

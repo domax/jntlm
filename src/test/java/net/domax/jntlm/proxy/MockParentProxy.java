@@ -8,6 +8,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
@@ -27,7 +28,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class MockParentProxy {
 
   /** A request as received by the mock. {@code ntlmType} is 0 when no NTLM header was present. */
-  record Received(String method, String url, int ntlmType, long type1Flags, String body) {}
+  record Received(
+      String method,
+      String url,
+      int ntlmType,
+      long type1Flags,
+      String body,
+      List<String> headerLines) {}
+
+  /** What the mock does after writing a {@link #rawResponse raw response}. */
+  enum AfterRaw {
+    /** Keep serving further requests on the connection. */
+    KEEP,
+    /** Close the connection. */
+    CLOSE,
+    /** Stop responding but keep the connection open until the peer closes it. */
+    HANG
+  }
 
   private ServerSocket serverSocket;
   private Thread acceptThread;
@@ -46,6 +63,10 @@ final class MockParentProxy {
   private volatile String responseBody = "hello";
   private volatile boolean chunkedResponse;
   private volatile boolean closeAfterResponse;
+  private volatile String rawResponse;
+  private volatile AfterRaw afterRaw = AfterRaw.KEEP;
+  private volatile boolean noResponse;
+  private volatile String challengeHeader;
 
   void start() throws IOException {
     serverSocket = new ServerSocket();
@@ -123,6 +144,30 @@ final class MockParentProxy {
   }
 
   /**
+   * Serves these exact bytes (ISO-8859-1) instead of the default {@code 200 hello} to every
+   * non-CONNECT request that passes authentication, then acts per {@code after}.
+   */
+  MockParentProxy rawResponse(String raw, AfterRaw after) {
+    this.rawResponse = raw;
+    this.afterRaw = after;
+    return this;
+  }
+
+  /** When {@code true}, never answers any request (keeps the connection open until closed). */
+  MockParentProxy noResponse(boolean noResponse) {
+    this.noResponse = noResponse;
+    return this;
+  }
+
+  /**
+   * Replaces the {@code Proxy-Authenticate} value of the NTLM challenge (e.g. {@code NTLM AAAA}).
+   */
+  MockParentProxy challengeHeader(String value) {
+    this.challengeHeader = value;
+    return this;
+  }
+
+  /**
    * Stops accepting connections and waits for the accept loop to exit. On Linux, closing a
    * listening socket while a virtual thread is blocked in {@code accept()} only releases the file
    * descriptor once that thread wakes up, so without the join the port may still accept connections
@@ -170,10 +215,14 @@ final class MockParentProxy {
         if (req.proxyAuthorization != null) proxyAuthorizations.add(req.proxyAuthorization);
         int type = ntlm == null || ntlm.length < 12 ? 0 : (int) u32(ntlm, 8);
         long flags = type == 1 && ntlm.length >= 16 ? u32(ntlm, 12) : -1;
-        received.add(new Received(req.method, req.url, type, flags, req.body));
+        received.add(new Received(req.method, req.url, type, flags, req.body, req.headerLines));
+        if (noResponse) {
+          drain(in);
+          return;
+        }
 
         if (!requireAuth || authenticated) {
-          if (serve(req, in, out, responseBody, chunkedResponse, closeAfterResponse)) return;
+          if (serve(req, in, out)) return;
           continue;
         }
         if (type == 0 || type == 1) {
@@ -185,14 +234,15 @@ final class MockParentProxy {
           connFlags = flags;
           challenges.incrementAndGet();
           if (challengeDelayMs > 0) sleep(challengeDelayMs);
-          sendChallenge(out, type2Flags);
+          if (challengeHeader != null) send407(out, challengeHeader);
+          else sendChallenge(out, type2Flags);
         } else if (type == 3) {
           if (rejectType3.contains(connFlags)) {
             send407(out, "NTLM");
             continue;
           }
           authenticated = true;
-          if (serve(req, in, out, responseBody, chunkedResponse, closeAfterResponse)) return;
+          if (serve(req, in, out)) return;
         } else {
           send407(out, null);
         }
@@ -202,21 +252,37 @@ final class MockParentProxy {
     }
   }
 
-  private static boolean serve(
-      Request req,
-      InputStream in,
-      OutputStream out,
-      String body,
-      boolean chunked,
-      boolean closeAfterResponse)
-      throws IOException {
+  /** Serves an authenticated request; returns {@code true} if the connection must end. */
+  private boolean serve(Request req, InputStream in, OutputStream out) throws IOException {
     if ("CONNECT".equals(req.method)) {
       sendConnectEstablished(out);
       echo(in, out);
       return true;
     }
-    sendOk(out, body, chunked);
+    String raw = rawResponse;
+    if (raw != null) {
+      out.write(raw.getBytes(StandardCharsets.ISO_8859_1));
+      out.flush();
+      return switch (afterRaw) {
+        case KEEP -> false;
+        case CLOSE -> true;
+        case HANG -> {
+          drain(in);
+          yield true;
+        }
+      };
+    }
+    sendOk(out, responseBody, chunkedResponse);
     return closeAfterResponse;
+  }
+
+  /** Reads and discards until the peer closes the connection. */
+  @SuppressWarnings("StatementWithEmptyBody")
+  private static void drain(InputStream in) throws IOException {
+    byte[] buf = new byte[1024];
+    while (in.read(buf) != -1) {
+      // discard
+    }
   }
 
   @SuppressWarnings("java:S2925")
@@ -247,8 +313,10 @@ final class MockParentProxy {
     String url = parts.length > 1 ? parts[1] : "";
     int contentLength = 0;
     String proxyAuth = null;
+    List<String> headerLines = new ArrayList<>();
     String line;
     while ((line = readLineRaw(in)) != null && !line.isEmpty()) {
+      headerLines.add(line);
       int colon = line.indexOf(':');
       if (colon <= 0) continue;
       String name = line.substring(0, colon).trim();
@@ -260,7 +328,7 @@ final class MockParentProxy {
     if (contentLength > 0) {
       body = new String(in.readNBytes(contentLength), StandardCharsets.ISO_8859_1);
     }
-    return new Request(method, url, proxyAuth, body);
+    return new Request(method, url, proxyAuth, body, List.copyOf(headerLines));
   }
 
   private static String readLineRaw(InputStream in) throws IOException {
@@ -359,7 +427,12 @@ final class MockParentProxy {
     }
   }
 
-  private record Request(String method, String url, String proxyAuthorization, String body) {}
+  private record Request(
+      String method,
+      String url,
+      String proxyAuthorization,
+      String body,
+      List<String> headerLines) {}
 
   private static long u32(byte[] buf, int off) {
     return (buf[off] & 0xffL)

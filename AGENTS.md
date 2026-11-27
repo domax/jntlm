@@ -70,4 +70,14 @@ proxy**.
   `application-local.yml`). Falls back to the dialect default.
 - Credentials: supply either a plaintext `password` (hashes derived at startup in `JntlmConfig`)
   **or** pre-computed hex hashes (`pass-lm`/`pass-nt`/`pass-ntlm2`) — not both.
+- Strict framing (Not in CNTLM): `HttpIo` throws `HttpProtocolException` (an `IOException` carrying
+  `status()` 400/431/502) for malformed, ambiguous or oversized messages; callers answer with
+  `ErrorPages.send` and close. A parent connection is pooled only when `HttpIo.isCleanlyFramed`
+  (explicit CL or chunked) and neither side sent `Connection: close`.
+- `jntlm.limits.*` (`JntlmProperties.Limits` → `HttpLimits` bean, validated in `JntlmConfig`):
+  header size/count, client idle / parent read / tunnel idle timeouts (`SO_TIMEOUT`, `0` = off) and
+  a `ProxyServer` semaphore for `max-client-connections` (503 when full).
+- Other "Not in CNTLM" deviations: Type-2 validation + exact-size Type-3 (`NtlmException` → 502),
+  startup WARN for a non-loopback listener without client auth. Mark any new deviation with
+  "Not in CNTLM" in Javadoc.
 
