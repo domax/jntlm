@@ -1,3 +1,4 @@
+/*
 plugins {
     id("com.gradle.develocity") version("3.18.2")
 }
@@ -8,5 +9,6 @@ develocity {
         termsOfUseAgree = "yes"
     }
 }
+*/
 
 rootProject.name = 'jntlm'
